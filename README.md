@@ -1,127 +1,97 @@
 # referenced-automation-utils
 
-Shared, framework-agnostic commons library for the **referenced-automation-\*** family:
+Shared, framework-agnostic TypeScript utilities reused by every other `referenced-automation-*` repo (`ui`, `api`, `ui-api`, `sap`): environment config, logging, crypto, date, random test data, JSON/YAML/CSV/Excel, JSON Schema validation, dot/bracket object-path traversal, DB access, and email.
 
-| Repository | Depends on this library for |
+Nothing in here depends on Playwright or a browser - it is pure Node/TypeScript, so it is equally useful to the UI framework, the API framework, and anything else.
+
+## Quick start
+
+```bash
+./scripts/setup.sh      # npm ci (scripts/setup.bat on Windows)
+npm test                # runs this package's own unit tests
+```
+
+## What's included
+
+| Module | What it's for |
 |---|---|
-| [referenced-automation-ui](https://github.com/achaljoshi/referenced-automation-ui) | test data, config loading, JSON/YAML fixtures |
-| [referenced-automation-api](https://github.com/achaljoshi/referenced-automation-api) | JSON helpers, test data, crypto (request signing) |
-| [referenced-automation-sap](https://github.com/achaljoshi/referenced-automation-sap) | Excel/CSV test data, DB verification, config loading |
-| [referenced-automation-ui-api](https://github.com/achaljoshi/referenced-automation-ui-api) | everything above, transitively via ui + api |
+| `config/env` | `loadEnv()` - loads `.env.<ENV>` based on the `ENV` variable, typed `get`/`getInt`/`getBoolean`/`getList` accessors. See [Environments](#environments). |
+| `logger/logger` | Console + `logs/automation.log` logging (winston), plus `loggedStep()` to wrap any action with start/pass/fail logging. |
+| `crypto` | md5/sha1/sha256/sha512, hmac, base64, and `mask()` for logging sensitive values safely. |
+| `dateUtils` | Thin `dayjs`-based helpers: format/parse, add days/months/hours/minutes, diff, compare, epoch conversion. |
+| `randomUtils` | `@faker-js/faker`-backed test data: names, emails, addresses, UUIDs, bounded random numbers, past/future dates, credit card numbers. |
+| `jsonUtils` / `yamlUtils` | Parse/stringify/read-from-file, plus `readAt()` for path-based reads on raw JSON text. |
+| `csvUtils` / `excelUtils` | Read/write CSV and `.xlsx` as arrays of row objects - the shape data-driven tests want. |
+| `validation` (`getPath`/`setPath`/`hasPath`/`requirePath`) | Dot/bracket path traversal over any object, e.g. `getPath(response, 'data.users[0].name')`. This is what the API framework's response wrapper is built on. |
+| `validation` (`validateSchema`) | JSON Schema (draft-07/2019/2020) validation via `ajv`, with a ready-to-assert `errorsText`. |
+| `db` (`DbClient`, `SqliteClient`) | A driver-agnostic query/update contract; implement it once per real DB engine your project needs. `SqliteClient` is a ready-to-use reference implementation. |
+| `emailUtils` | Send mail (nodemailer) and search an inbox for a message by subject (imapflow) - for OTP/verification-email assertions. |
 
-It ships **no** Selenium, Playwright, Cucumber, or reporting code - just the
-plumbing every automation framework ends up re-writing badly. Add it as a
-Maven dependency from Nexus exactly like any third-party library:
+## Environments
 
-```xml
-<dependency>
-    <groupId>com.company.automation</groupId>
-    <artifactId>referenced-automation-utils</artifactId>
-    <version>1.0.0-SNAPSHOT</version>
-</dependency>
-```
-
-## What's inside
-
-All classes live under `com.company.automation.commons` - a package
-deliberately distinct from `com.company.automation.utils` (used internally by
-`referenced-automation-ui`) so that a project depending on both this library
-*and* `referenced-automation-ui` never hits a split-package/class-shadowing
-surprise on its classpath.
-
-| Package | Class | Purpose |
-|---|---|---|
-| `commons.excel` | `ExcelUtils` | Read/write `.xlsx` sheets as `List<Map<String,String>>` or raw rows (Apache POI) |
-| `commons.csv` | `CsvUtils` | Read/write CSV as maps or raw rows (opencsv) |
-| `commons.json` | `JsonUtils` | JSON (de)serialization, generic map/tree parsing, JSON Pointer lookups (Jackson) |
-| `commons.json` | `YamlUtils` | YAML (de)serialization, mirrors `JsonUtils` (Jackson + YAML) |
-| `commons.date` | `DateUtils` | `java.time`-based formatting, parsing, arithmetic, epoch conversions |
-| `commons.random` | `RandomDataUtils` | Synthetic test data - names, emails, addresses, UUIDs, numbers (DataFaker) |
-| `commons.db` | `DatabaseUtils` | JDBC query/update helpers returning `List<Map<String,Object>>` (commons-dbutils) - **bring your own JDBC driver** |
-| `commons.email` | `EmailUtils` | Send over SMTP, search an IMAP inbox by subject (Jakarta Mail / Angus) |
-| `commons.crypto` | `CryptoUtils` | MD5/SHA-1/SHA-256/SHA-512 digests, HMAC signing, Base64, PII masking |
-| `commons.config` | `PropertyLoader` | Generic `.properties` loader: system property > env var > file, typed getters |
-| `commons.exceptions` | `CommonsException` | Single unchecked exception every utility throws, so call sites stay `throws`-free |
-
-## Why a shared library, and why these boundaries
-
-- **No logging backend, on purpose.** This library depends only on
-  `slf4j-api` - it never ships a `log4j2.xml` or pulls in `log4j-core`/
-  `log4j-slf4j2-impl` at compile scope. A shared jar that bundles its own
-  logging configuration causes "multiple `log4j2.xml` on the classpath"
-  warnings (and unpredictable *which one wins* behaviour) the moment two
-  libraries that both ship one are combined - which is exactly what happens
-  in `referenced-automation-sap` and `referenced-automation-ui-api`, which
-  pull in this library *alongside* `referenced-automation-ui`/`-api`. The
-  **terminal** framework (ui, api, sap, ui-api) is the only place a
-  `log4j2.xml` and a concrete logging backend belong.
-- **No JDBC driver bundled.** `DatabaseUtils` works against any JDBC 4+
-  driver, but which database an organisation runs (Oracle, Postgres, MySQL,
-  MSSQL, ...) is a per-project choice - add the driver you need in the
-  consuming project's own `pom.xml`.
-- **No Selenium/Playwright/Cucumber.** Keeping this library UI- and
-  test-runner-agnostic means it can be reused unchanged even if a future
-  framework in this family targets something other than Playwright.
-
-## Building
+Every consuming repo follows the same pattern: `.env.<name>` files at the repo root (committed, no secrets), an optional `.env.<name>.local` (gitignored, for real credentials), selected at runtime by the `ENV` variable:
 
 ```bash
-./mvnw clean test      # compile + run the unit test suite
-./mvnw clean install   # ...and install into your local ~/.m2 for use by a sibling repo
+ENV=qa npx playwright test      # loads .env.qa
+ENV=stage npx playwright test   # loads .env.stage
 ```
 
-`DatabaseUtilsTest` runs against a real in-memory H2 database (test scope
-only - never shipped in the published jar) rather than a mocked
-`java.sql.Connection`, so the SQL/parameter-binding path is actually
-exercised, not just the mock's configured behaviour.
+A `playwright.config.ts` only has to do this once, and every test/fixture that needs config imports the same reader instead of touching `process.env` directly:
 
-> This library was authored and statically verified without a working
-> Maven Central connection in the build sandbox (see the top-level
-> `referenced-automation-ui` README for the full explanation). Every
-> third-party API used here (POI, opencsv, Jackson, DataFaker, commons-dbutils,
-> Jakarta Mail, commons-codec) was checked against its official documentation.
-> Please run `./mvnw clean test` yourself (or let CI do it) before relying on
-> a release build.
+```ts
+import { loadEnv } from '@automation/referenced-automation-utils';
 
-## IntelliJ setup
+const env = loadEnv(); // ENV var, defaulting to "qa"
+export default defineConfig({
+  use: { baseURL: env.get('BASE_URL') },
+});
+```
 
-Open the project root in IntelliJ - the checked-in `.idea/` directory already
-configures:
+See `.env.qa` / `.env.stage` / `.env.dev` in this repo for the pattern, and `.env.example` for what's safe to commit vs. what belongs in a gitignored `.local` file.
 
-- Project SDK: Java 17
-- Git as the VCS root
-- Two ready-to-run Maven run configurations: **Maven: clean test** and
-  **Maven: clean install**
+## Distributing this package (no registry yet)
 
-No Cucumber/Gherkin plugin is required for this repository (there are no
-`.feature` files here), so nothing else needs to be installed - just open and
-run.
-
-## Using the Maven Wrapper
-
-No local Maven install is required:
+Until a private npm registry (e.g. Nexus) is wired up, build a versioned tarball locally and hand it out - either by copying it to a shared folder every consuming repo can read, or by giving it directly to DevOps to publish:
 
 ```bash
-./mvnw clean test        # macOS/Linux
-mvnw.cmd clean test       # Windows
+./scripts/create-package.sh            # writes ../shared-packages/referenced-automation-utils-<version>.tgz
+./scripts/create-package.bat           # same, for Windows
 ```
 
-## Publishing to Nexus
+A consuming repo then adds it exactly like any npm dependency:
 
-Same convention as every repo in this family - see `settings.xml.sample` for
-local publishing, and `.gitlab-ci.yml`/`.github/workflows/ci.yml` for how CI
-publishes automatically from protected secrets (`NEXUS_USER`, `NEXUS_PASS`,
-`NEXUS_RELEASE_URL`, `NEXUS_SNAPSHOT_URL`) on the default branch and on tags.
+```jsonc
+// package.json
+"dependencies": {
+  "@automation/referenced-automation-utils": "file:../shared-packages/referenced-automation-utils-1.0.0.tgz"
+}
+```
 
-## CI/CD
+Once Nexus (or another private registry) is available, the same tarball is what gets `npm publish`ed there - switch consumers to a normal registry version range (`"^1.0.0"`) and point `.npmrc` at the registry; nothing about the package itself changes.
 
-Both pipelines run the same three stages and are kept functionally identical:
+## IDE setup
 
-- **`.gitlab-ci.yml`** - GitLab CI, `maven:3.9-eclipse-temurin-17` image.
-- **`.github/workflows/ci.yml`** - GitHub Actions, `actions/setup-java@v4` (Temurin 17).
+- **VS Code**: opening this repo prompts to install the recommended extensions (`.vscode/extensions.json`) - Playwright Test, ESLint, Prettier. Format-on-save and ESLint auto-fix are pre-wired in `.vscode/settings.json`.
+- **IntelliJ / WebStorm**: `.idea/` ships ESLint and Prettier turned on automatically, plus run configurations for `npm: test` and `npm: build`. Node.js/TypeScript/Playwright support is bundled with WebStorm and IntelliJ Ultimate - no plugin install needed.
 
-`build` compiles main + test sources, `test` runs the JUnit 5 suite and
-publishes a JUnit XML report, `deploy` runs `mvn -DskipTests deploy` to Nexus
-on the default branch or a tag. There is no retry stage here (unlike the
-Cucumber-based repos in this family) - flaky unit tests should be fixed, not
-retried.
+## Project layout
+
+```
+referenced-automation-utils/
+├── src/                    # SHIPPED in the package (see package.json "files")
+│   ├── config/env.ts
+│   ├── logger/logger.ts
+│   ├── crypto/cryptoUtils.ts
+│   ├── date/dateUtils.ts
+│   ├── random/randomUtils.ts
+│   ├── data/{jsonUtils,yamlUtils,csvUtils,excelUtils}.ts
+│   ├── validation/{objectPath,schemaValidator}.ts
+│   ├── db/{dbClient,sqliteClient}.ts
+│   ├── email/emailUtils.ts
+│   └── index.ts             # barrel export - this is what `import ... from '@automation/referenced-automation-utils'` resolves to
+├── tests/                  # this package's own unit tests, NOT shipped
+├── scripts/{setup,create-package}.{sh,bat}
+├── .env.example, .env.qa, .env.stage, .env.dev
+├── .vscode/, .idea/
+└── playwright.config.ts     # this repo's own test runner config
+```

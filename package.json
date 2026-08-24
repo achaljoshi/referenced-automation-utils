@@ -1,0 +1,64 @@
+{
+  "name": "@automation/referenced-automation-utils",
+  "version": "1.0.0",
+  "description": "Shared, framework-agnostic utilities (env config, logging, crypto, date, random data, JSON/YAML/CSV/Excel, schema validation, object path traversal, email, DB) reused by every other referenced-automation-* repo.",
+  "license": "UNLICENSED",
+  "private": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "clean": "rimraf dist *.tgz",
+    "lint": "eslint . --ext .ts",
+    "format": "prettier --write .",
+    "test": "playwright test",
+    "pretest": "npm run build",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "@faker-js/faker": "^9.3.0",
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1",
+    "csv-parse": "^5.6.0",
+    "csv-stringify": "^6.5.2",
+    "dayjs": "^1.11.13",
+    "dotenv": "^16.4.7",
+    "exceljs": "^4.4.0",
+    "imapflow": "^1.0.181",
+    "js-yaml": "^4.1.0",
+    "lodash": "^4.18.1",
+    "mailparser": "^3.7.2",
+    "nodemailer": "^6.9.16",
+    "winston": "^3.17.0"
+  },
+  "optionalDependencies": {
+    "better-sqlite3": "^11.8.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.1",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/js-yaml": "^4.0.9",
+    "@types/lodash": "^4.17.25",
+    "@types/mailparser": "^3.4.6",
+    "@types/node": "^22.10.5",
+    "@types/nodemailer": "^6.4.17",
+    "@typescript-eslint/eslint-plugin": "^8.19.1",
+    "@typescript-eslint/parser": "^8.19.1",
+    "eslint": "^8.57.1",
+    "prettier": "^3.4.2",
+    "rimraf": "^6.0.1",
+    "typescript": "^5.7.3"
+  }
+}
