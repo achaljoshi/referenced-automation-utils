@@ -19,5 +19,9 @@ module.exports = {
     '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
     '@typescript-eslint/explicit-module-boundary-types': 'off',
     '@typescript-eslint/no-explicit-any': 'off',
+    // Playwright fixtures are destructured as `({}, use) => ...` when a
+    // fixture doesn't depend on any other fixture - this is the documented
+    // pattern, not a mistake.
+    'no-empty-pattern': 'off',
   },
 };
