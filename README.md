@@ -11,6 +11,8 @@ Nothing in here depends on Playwright or a browser - it is pure Node/TypeScript,
 npm test                # runs this package's own unit tests
 ```
 
+This is the one repo in the family with no dependencies of its own, so its `setup.sh`/`setup.bat` are the plain case. `referenced-automation-api`, `-ui`, `-ui-api`, and `-sap` all depend on this package and their own `setup.sh`/`setup.bat` build it automatically from a sibling checkout if it isn't already packaged - see any of their READMEs for that flow. For a fresh clone of the whole family, check out all five repos next to each other in the same parent directory first.
+
 ## What's included
 
 | Module | What it's for |
