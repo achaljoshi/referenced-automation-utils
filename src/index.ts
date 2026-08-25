@@ -13,3 +13,7 @@ export * from './exceptions/CommonsError';
 export * from './db/dbClient';
 export { SqliteClient } from './db/sqliteClient';
 export * as emailUtils from './email/emailUtils';
+export { SmtpClient } from './email/smtpClient';
+export type { EmailMessage, SentEmail } from './email/smtpClient';
+export { SftpClient } from './transfer/sftpClient';
+export type { SftpConfig, SftpFileInfo } from './transfer/sftpClient';
