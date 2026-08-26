@@ -4,6 +4,8 @@ Shared, framework-agnostic TypeScript utilities reused by every other `reference
 
 Nothing in here depends on Playwright or a browser - it is pure Node/TypeScript, so it is equally useful to the UI framework, the API framework, and anything else.
 
+**New to this repo family?** See [CROSS_REPO_GUIDE.md](./CROSS_REPO_GUIDE.md) for the full picture: how the five repos share code, how to build/package/consume across them, environment setup, fixtures, overriding behavior, and a new-joiner checklist. This README covers only what's specific to `utils` itself.
+
 ## Quick start
 
 ```bash
