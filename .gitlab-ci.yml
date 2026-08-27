@@ -1,0 +1,87 @@
+# ============================================================================
+# GitLab CI pipeline for referenced-automation-utils.
+#
+# Triggers on: any push to main (including a merge request being merged),
+# every merge request, and manual "Run pipeline" from the GitLab UI - see
+# the `workflow:` block below.
+#
+# ---- Restricted-network setup: read this before your first run ----
+#
+# The public npm registry is not reachable from this network - `npm ci`
+# needs to go through your org's JFrog Artifactory instead. One CI/CD
+# variable makes that work (Settings > CI/CD > Variables in this project,
+# or set at group level so every repo in the family shares it):
+#
+#   NPM_REGISTRY_URL   Your Artifactory npm registry URL (the same one
+#                       already configured in your local ~/.npmrc / npm
+#                       config - this pipeline never hardcodes it, just
+#                       reads it from the variable). If unset, `npm ci`
+#                       falls back to npm's normal default registry, which
+#                       will fail here - so this one is effectively
+#                       required.
+#
+# `image:` below is the Playwright Docker image mirrored into this org's
+# JFrog Artifactory, reused here purely as a reachable Node.js base (this
+# repo's own tests never launch a browser, so nothing about Playwright's
+# browser binaries matters here) - see referenced-automation-ui's
+# .gitlab-ci.yml for the fuller explanation of why every repo in this
+# family uses this same image rather than a generic node:*-slim one (that
+# would need its own confirmed-reachable Artifactory mirror, which this
+# repo hasn't needed to check since it already needs the Playwright image
+# family's browser-testing siblings to use it anyway).
+#
+# This is the one repo in the family with no dependency on any sibling
+# repo, so there's no equivalent of the *_REPO_URL cross-repo cloning step
+# every other repo's pipeline has.
+# ============================================================================
+
+image: csg-cst-docker-local.artifactory.alm.corp.hmrc.gov.uk:443/common/microsoft/playwright:v1.47.0-jammy
+
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+
+stages:
+  - build
+  - test
+
+variables:
+  npm_config_cache: "${CI_PROJECT_DIR}/.npm-cache"
+
+cache:
+  key: "${CI_COMMIT_REF_SLUG}-npm"
+  paths:
+    - .npm-cache/
+
+before_script:
+  - if [ -n "${NPM_REGISTRY_URL:-}" ]; then npm config set registry "$NPM_REGISTRY_URL"; fi
+
+build:
+  stage: build
+  script:
+    - npm ci
+    - npm run build
+    - npm run lint
+  artifacts:
+    paths:
+      - dist/
+    expire_in: 1 hour
+
+test:
+  stage: test
+  needs: ["build"]
+  script:
+    - npm ci
+    - npm test
+  artifacts:
+    when: always
+    paths:
+      - test-results/
+      - playwright-report/
+      - logs/
+    reports:
+      junit: test-results/junit.xml
+    expire_in: 30 days
