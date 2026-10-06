@@ -2,16 +2,15 @@ import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { Server } from 'ssh2';
 
 export interface SftpTestServerHandle {
-  server: Server;
   host: string;
   port: number;
   username: string;
   password: string;
   /** The real local directory backing the server's file tree - "/" on the SFTP side maps to this on disk. */
   root: string;
+  stop(): Promise<void>;
 }
 
 const OPEN_MODE = { READ: 0x01, WRITE: 0x02, APPEND: 0x04, CREAT: 0x08, TRUNC: 0x10, EXCL: 0x20 };
@@ -51,6 +50,11 @@ function longname(name: string, isDir: boolean): string {
  * on disk. Fast, deterministic, no external service or Docker required.
  */
 export async function startSftpTestServer(): Promise<SftpTestServerHandle> {
+  // Loaded lazily so importing the utils package never pays for ssh2.
+  // require, not import(): ssh2 is CommonJS with lazily-defined exports, and a native dynamic
+  // import() (which test runners may leave untouched) can't see `Server` on it.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { Server } = require('ssh2') as typeof import('ssh2');
   const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'sftp-test-'));
   const username = 'testuser';
   const password = 'testpass';
@@ -216,10 +220,19 @@ export async function startSftpTestServer(): Promise<SftpTestServerHandle> {
     });
   });
 
-  return { server, host: '127.0.0.1', port, username, password, root };
+  return {
+    host: '127.0.0.1',
+    port,
+    username,
+    password,
+    root,
+    stop: async () => {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await fs.promises.rm(root, { recursive: true, force: true });
+    },
+  };
 }
 
-export async function stopSftpTestServer(handle: SftpTestServerHandle): Promise<void> {
-  await new Promise<void>((resolve) => handle.server.close(() => resolve()));
-  await fs.promises.rm(handle.root, { recursive: true, force: true });
+export function stopSftpTestServer(handle: SftpTestServerHandle): Promise<void> {
+  return handle.stop();
 }

@@ -1,6 +1,7 @@
 import { ImapFlow } from 'imapflow';
 import { simpleParser } from 'mailparser';
 import * as nodemailer from 'nodemailer';
+import { adapterStep } from '../adapters/adapter';
 
 export interface SmtpConfig {
   host: string;
@@ -22,7 +23,13 @@ export async function sendEmail(
   message: { from: string; to: string; subject: string; text?: string; html?: string },
 ): Promise<void> {
   const transporter = nodemailer.createTransport(config);
-  await transporter.sendMail(message);
+  try {
+    await adapterStep('smtp', 'sendEmail', () => transporter.sendMail(message), {
+      details: { to: message.to, subject: message.subject },
+    });
+  } finally {
+    transporter.close();
+  }
 }
 
 /**

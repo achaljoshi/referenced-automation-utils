@@ -38,7 +38,7 @@ and [New joiner checklist](#16-new-joiner-checklist).
 | `referenced-automation-utils` | Shared, framework-agnostic TS utilities (env config, logging, crypto, date, random data, JSON/YAML/CSV/Excel, JSON Schema validation, object-path traversal, DB access, SMTP, SFTP). No Playwright, no browser. | *nothing* |
 | `referenced-automation-api` | Playwright-based API testing framework (`ApiClient`, auth strategies, pagination, response traversal) + API mocking tools (`MockServer`, `mockApiRoute`, record/replay). | `utils` |
 | `referenced-automation-ui` | Playwright UI testing framework (`actions`, fixtures, accessibility, device emulation). | `utils` |
-| `referenced-automation-sap` | SAP Fiori/UI5 automation on top of `ui`'s `actions` (`byControlId`, `waitForUI5Ready`). | `ui`, `utils` |
+| `referenced-automation-sap` | SAP automation on Playwright: Fiori/UI5 helpers (`byControlId`, `waitForUI5Ready`) **and** classic SAP GUI - converts SAP GUI Scripting recordings (`.vbs`) into Playwright tests that wait for SAP by themselves. | `ui`, `utils` |
 | `referenced-automation-ui-api` | Demo/glue repo proving `ui` + `api` compose (shared login session, mocking a UI page's runtime API data). Not a publishable package. | `api`, `ui`, `utils` |
 
 Dependency graph:
@@ -427,9 +427,20 @@ mocking/blocking. Full list: `click`, `dblClick`, `rightClick`, `fill`,
 import { byControlId, waitForUI5Ready, actions, step, test, expect } from '@automation/referenced-automation-sap';
 ```
 
-`sap` only adds `byControlId`/`waitForUI5Ready`; everything else
+For Fiori/UI5, `sap` adds `byControlId`/`waitForUI5Ready`; everything else
 (`actions`, `step`, `test`, `expect`) is re-exported straight from `ui`, so a
 SAP test only ever needs one import line.
+
+For classic SAP GUI it adds:
+
+```ts
+import { sapGuiTest, SapGuiSession, convertVbs, parseVbs, createSampleSapSystem } from '@automation/referenced-automation-sap';
+```
+
+and two commands: `sap-vbs-to-playwright <recording.vbs|folder>` (recording -> spec) and
+`sap-gui-doctor` (checks a Windows machine can drive SAP GUI). Tests that drive real SAP
+run only on Windows with SAP GUI installed and are *skipped* elsewhere. See
+`referenced-automation-sap`'s README, which also says what is and is not verified.
 
 ### `referenced-automation-ui-api`
 
@@ -796,12 +807,25 @@ Every repo ships the same baseline:
 
 ## 15. Troubleshooting / known gotchas
 
+- **`npm install <tarball> -D` moved a runtime dependency to devDependencies**:
+  don't pass `-D` for the `@automation/*` tarballs - they are dependencies of
+  `sap`/`ui`/`api`, and under `-D` they'd be missing for whoever installs them.
+- **"Executable doesn't exist" after a Playwright upgrade**: browsers are per
+  Playwright version - run `npx playwright install chromium`. More than one
+  `playwright-core` in `npm ls playwright-core` is the usual root cause; see
+  utils README > "Bumping Playwright".
+- **`(req) => ...` is implicitly `any` in my test**: fixed in `api` (types were
+  collapsing to `unknown`); refresh the `api` tarball. Playwright does not
+  type-check tests, so run `npm run typecheck` (in `api`/`ui-api`).
 - **`EBADENGINE` warning during `npm install`**: cosmetic (an ESLint
   transitive dependency wants a newer Node than `engines` requires) - safe
   to ignore.
 - **A change to a shared repo "isn't showing up" in a consumer**: you almost
-  certainly need to `rm -rf node_modules && npm install <tarball path>` in
-  the consumer after repackaging - see [Build, package, consume: the day-to-day loop](#5-build-package-consume-the-day-to-day-loop).
+  certainly need to `npm install <tarball path>` in the consumer after
+  repackaging (that refreshes the lockfile's integrity hash; **don't delete
+  `package-lock.json`** - without it every dependency, Playwright included,
+  floats to whatever is newest). If it still serves the old copy,
+  `rm -rf node_modules` first - see [Build, package, consume: the day-to-day loop](#5-build-package-consume-the-day-to-day-loop).
   A plain `npm ci` can serve a stale cached copy since the tarball's
   filename/version don't change between edits.
 - **A rebuilt tarball still contains a file you deleted from source**: you

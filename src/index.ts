@@ -1,5 +1,7 @@
 export * from './config/env';
 export * from './logger/logger';
+export * from './logger/correlation';
+export * from './adapters/adapter';
 export * as crypto from './crypto/cryptoUtils';
 export * as dateUtils from './date/dateUtils';
 export * as randomUtils from './random/randomUtils';
@@ -17,3 +19,6 @@ export { SmtpClient } from './email/smtpClient';
 export type { EmailMessage, SentEmail } from './email/smtpClient';
 export { SftpClient } from './transfer/sftpClient';
 export type { SftpConfig, SftpFileInfo } from './transfer/sftpClient';
+export * as testing from './testing';
+export { createPlaywrightConfig } from './playwright/config';
+export type { CreatePlaywrightConfigOptions } from './playwright/config';

@@ -1,4 +1,5 @@
 import Client from 'ssh2-sftp-client';
+import { adapterStep, type Adapter } from '../adapters/adapter';
 
 export interface SftpConfig {
   host: string;
@@ -40,27 +41,43 @@ export interface SftpFileInfo {
  * await sftp.close();
  * ```
  */
-export class SftpClient {
+export class SftpClient implements Adapter {
+  readonly name = 'sftp';
   private readonly client = new Client();
   private connected = false;
 
   async connect(config: SftpConfig): Promise<void> {
-    await this.client.connect(config);
+    // Host/port/user only - never the password/privateKey.
+    await adapterStep(this.name, 'connect', () => this.client.connect(config), {
+      details: { host: config.host, port: config.port ?? 22, username: config.username },
+    });
     this.connected = true;
+  }
+
+  /** True once connect() has succeeded and until close() - a cheap, side-effect-free check. */
+  async healthCheck(): Promise<boolean> {
+    return this.connected;
   }
 
   /** Uploads a local file to a remote path. */
   async upload(localPath: string, remotePath: string): Promise<void> {
-    await this.client.put(localPath, remotePath);
+    await adapterStep(this.name, 'upload', () => this.client.put(localPath, remotePath), {
+      details: { localPath, remotePath },
+    });
   }
 
   /** Downloads a remote file to a local path. */
   async download(remotePath: string, localPath: string): Promise<void> {
-    await this.client.get(remotePath, localPath);
+    await adapterStep(this.name, 'download', () => this.client.get(remotePath, localPath), {
+      details: { remotePath, localPath },
+    });
   }
 
   async list(remoteDir: string): Promise<SftpFileInfo[]> {
-    const entries = await this.client.list(remoteDir);
+    const entries = await adapterStep(this.name, 'list', () => this.client.list(remoteDir), {
+      level: 'debug',
+      details: { remoteDir },
+    });
     return entries.map((entry) => ({
       name: entry.name,
       type: entry.type as SftpFileInfo['type'],
@@ -70,24 +87,27 @@ export class SftpClient {
   }
 
   async exists(remotePath: string): Promise<false | 'd' | '-' | 'l'> {
-    return this.client.exists(remotePath);
+    return adapterStep(this.name, 'exists', () => this.client.exists(remotePath), {
+      level: 'debug',
+      details: { remotePath },
+    });
   }
 
   async delete(remotePath: string): Promise<void> {
-    await this.client.delete(remotePath);
+    await adapterStep(this.name, 'delete', () => this.client.delete(remotePath), { details: { remotePath } });
   }
 
   async mkdir(remoteDir: string, recursive = true): Promise<void> {
-    await this.client.mkdir(remoteDir, recursive);
+    await adapterStep(this.name, 'mkdir', () => this.client.mkdir(remoteDir, recursive), { details: { remoteDir, recursive } });
   }
 
   async rmdir(remoteDir: string, recursive = true): Promise<void> {
-    await this.client.rmdir(remoteDir, recursive);
+    await adapterStep(this.name, 'rmdir', () => this.client.rmdir(remoteDir, recursive), { details: { remoteDir, recursive } });
   }
 
   async close(): Promise<void> {
     if (!this.connected) return;
-    await this.client.end();
+    await adapterStep(this.name, 'close', () => this.client.end());
     this.connected = false;
   }
 }

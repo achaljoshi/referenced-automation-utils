@@ -20,7 +20,11 @@ This is the one repo in the family with no dependencies of its own, so its `setu
 | Module | What it's for |
 |---|---|
 | `config/env` | `loadEnv()` - loads `.env.<ENV>` based on the `ENV` variable, typed `get`/`getInt`/`getBoolean`/`getList` accessors. See [Environments](#environments). |
-| `logger/logger` | Console + `logs/automation.log` logging (winston), plus `loggedStep()` to wrap any action with start/pass/fail logging. |
+| `logger/logger` | Console + `logs/automation.log` logging (winston), plus `loggedStep()` to wrap any action with start/pass/fail logging. Reads correctly in a terminal **and** a raw CI log - see [Logging](#logging-local-and-ci). |
+| `logger/correlation` | A per-test correlation ID (`getCorrelationId`, `withCorrelationId`, `useTestCorrelation`) stamped on every log line and sent as `X-Correlation-Id` by the API client, so one failing flow can be grepped across the console, the API gateway and SAP. |
+| `adapters` (`Adapter`, `adapterStep`, `AdapterError`) | The contract every outside system (SMTP, SFTP, SQLite, SAP GUI) follows: a `name`, `healthCheck()`, `close()`, and every operation logged with timing and failures wrapped as `AdapterError('[sftp] upload failed: ...')`. Write a new client against it and it behaves like the rest. |
+| `testing` | In-process SMTP and SFTP servers for tests (`testing.startSmtpTestServer()`, `testing.startSftpTestServer()`), shared by every repo instead of copied into each. |
+| `playwright/config` (`createPlaywrightConfig`) | One Playwright config for the whole family: `BROWSER`/`DEVICE`/timeouts/reporters from `.env.<name>`, optional log-in-once `auth` project. Each repo's `playwright.config.ts` is now ~5 lines. See [Shared Playwright config](#shared-playwright-config). |
 | `crypto` | md5/sha1/sha256/sha512, hmac, base64, and `mask()` for logging sensitive values safely. |
 | `dateUtils` | Thin `dayjs`-based helpers: format/parse, add days/months/hours/minutes, diff, compare, epoch conversion. |
 | `randomUtils` | `@faker-js/faker`-backed test data: names, emails, addresses, UUIDs, bounded random numbers, past/future dates, credit card numbers. |
@@ -32,6 +36,77 @@ This is the one repo in the family with no dependencies of its own, so its `setu
 | `emailUtils` | One-off `sendEmail()` (nodemailer) and `findEmailBySubject()` to search an inbox (imapflow) - for OTP/verification-email assertions. |
 | `SmtpClient` | A reusable SMTP connection for sending several emails without reconnecting each time - `connect once, send many, close`, unlike `emailUtils.sendEmail()`'s one-shot connection. |
 | `SftpClient` | A pure Node.js SFTP client (connect/upload/download/list/exists/delete/mkdir/rmdir) - the same job WinSCP does interactively, but scriptable and identical on Windows, macOS/Linux, and GitLab CI's Linux runners, with no WinSCP install required anywhere. |
+
+## Logging (local and CI)
+
+`getLogger('component')` returns the shared winston logger. Output is built to be read in two places:
+
+```
+2026-10-07 03:01:35.019 [info] [w2] [cid:ad9e928b] [sap-gui] set text ... {"id":"wnd[0]/tbar[0]/okcd","value":"/nVA01"}
+2026-10-07 03:01:35.123 [info] [w2] [cid:ad9e928b] [sap-gui] set text ok (104ms)
+```
+
+- **One stream, stdout.** Lines are never split across stdout/stderr, so their order survives in a CI job log.
+- **Colour only in a real terminal.** Off when `CI` or `NO_COLOR` is set, so GitLab logs contain no escape codes; `FORCE_COLOR=1` turns it back on.
+- **`[w2]` is the Playwright worker, `[cid:ad9e928b]` the test's correlation ID.** With parallel workers, interleaved lines are unreadable without them. `grep ad9e928b` follows one test everywhere.
+- **Secrets are redacted** before anything is written: any value under a key that looks like `password`, `token`, `authorization`, `secret`, `api key`, `cookie` or `credential`.
+- **Errors are readable**: ANSI codes from Playwright's messages are stripped, multi-line messages stay multi-line.
+- **A file as well** (`logs/automation.log`, JSON lines - a CI artifact). If it can't be created (read-only checkout) the logger carries on with the console rather than failing the run.
+
+`LOG_LEVEL` (default `info`), `LOG_TO_FILE=false`, `LOG_FILE=<path>`, `NO_COLOR=1`, `FORCE_COLOR=1`. `tests/logger.spec.ts` asserts all of this against a real child process's output.
+
+## Adapters
+
+Anything that talks to a system outside the test process implements `Adapter` and wraps each operation in `adapterStep`:
+
+```ts
+async upload(local: string, remote: string) {
+  return adapterStep(this, 'upload', async () => { /* ... */ }, { details: { remote } });
+}
+```
+
+That one wrapper gives every client the same behaviour: `[sftp] upload ... {"remote":"/in/a.csv"}` then `[sftp] upload ok (84ms)`, and on failure an `AdapterError('[sftp] upload failed: <reason>')` carrying the original as `cause`. `SmtpClient`, `SftpClient`, `SqliteClient` and the SAP GUI session (in `referenced-automation-sap`) all use it.
+
+## Test servers
+
+```ts
+import { testing } from '@automation/referenced-automation-utils';
+const server = await testing.startSmtpTestServer();   // ... testing.stopSmtpTestServer(server)
+```
+
+`testing.startSftpTestServer()` is the same for SFTP. They load `smtp-server`/`ssh2` lazily, so a project that never calls them never loads either.
+
+## Shared Playwright config
+
+```ts
+// playwright.config.ts
+import { createPlaywrightConfig } from '@automation/referenced-automation-utils';
+export default createPlaywrightConfig({ dir: __dirname, name: '@automation/my-project', baseUrlKey: 'BASE_URL' });
+```
+
+Everything else comes from `.env.<name>` or the environment (`BROWSER`, `DEVICE`, `HEADLESS`, `WORKERS`, `RETRIES`, `TEST_TIMEOUT_MS`, ...; the full list is in the function's doc comment). An unknown `BROWSER` fails immediately with the valid names instead of silently running chromium. Log in once and reuse it everywhere with `auth: { setupMatch: /auth\.setup\.ts/, storageState: AUTH_FILE }` - see `referenced-automation-ui-api` for a working example.
+
+## No waits in tests
+
+Playwright already waits inside every action and web-first assertion, so a fixed sleep is either too short (flaky) or too long (slow). The family enforces this rather than hoping:
+
+- `ui`'s state reads (`isVisible`, `isEnabled`, `isChecked`, `count`, `allText`) **wait** up to the expect timeout; pass `{ timeout: 0 }` only to read the state *right now* (asserting something is **not** there).
+- ESLint **errors** on `waitForTimeout` and on `'networkidle'` in `ui`, `sap` and `ui-api`.
+- `ui/tests/noWaits.spec.ts` proves it against a page that renders late.
+- The SAP GUI half has the same property by construction: every step waits for SAP to be idle and the element to exist.
+
+## Bumping Playwright
+
+All five repos must resolve **one** `playwright-core` (two copies mean two sets of browser revisions and confusing "executable doesn't exist" errors). The policy: a caret floor in `package.json` plus the lockfile for the exact version, and a direct `playwright-core` devDependency so npm dedupes it.
+
+1. In each repo set `@playwright/test` **and** `playwright-core` to the new `^x.y.z` (and the peer range in `ui`/`api`/`sap`).
+2. `npm install` - **keep the lockfile**. Deleting `package-lock.json` makes every version float.
+3. `npx playwright install chromium` (browsers are per Playwright version).
+4. `npm ls playwright-core` must show one version, `deduped` everywhere.
+
+## Known advisory: `@faker-js/faker`
+
+`npm audit` reports one advisory against `@faker-js/faker` v9. v10 fixes it but is ESM-only and this family compiles to CommonJS, so we stay on v9. `randomUtils` generates test data and never processes untrusted input, so the exposure is nil here; revisit when the family moves to ESM.
 
 ## Environments
 

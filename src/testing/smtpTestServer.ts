@@ -1,25 +1,35 @@
-import { SMTPServer } from 'smtp-server';
-import { simpleParser, type ParsedMail } from 'mailparser';
+import type { ParsedMail } from 'mailparser';
 
 export interface SmtpTestServerHandle {
-  server: SMTPServer;
   host: string;
   port: number;
   username: string;
   password: string;
   /** Every message accepted so far, parsed - newest last. */
   received: ParsedMail[];
+  stop(): Promise<void>;
 }
 
 /**
- * A real, in-process SMTP server for testing SmtpClient against - not a
- * live third-party mail service, so it's fast, deterministic, and works
- * offline/in CI. Requires AUTH LOGIN/PLAIN with a fixed username/password
- * (so the test also proves SmtpConfig.auth is actually sent), and parses
- * every accepted message with mailparser so tests can assert on subject/
- * body/recipients without a human reading a mailbox.
+ * A real, in-process SMTP server for testing anything that sends email -
+ * SmtpClient, or an application under test pointed at it. Not a live mail
+ * service, so it's fast, deterministic, and works offline/in CI. Requires
+ * AUTH with a fixed username/password (so tests also prove the credentials
+ * are actually sent) and parses every accepted message with mailparser so a
+ * test can assert on subject/body/recipients without a human reading a
+ * mailbox.
+ *
+ * Loaded lazily: `smtp-server` is only required when this function is
+ * called, so importing @automation/referenced-automation-utils never pays
+ * for it.
  */
 export async function startSmtpTestServer(): Promise<SmtpTestServerHandle> {
+  // require, not import(): see sftpTestServer.ts - same CommonJS interop reason.
+  /* eslint-disable @typescript-eslint/no-require-imports */
+  const { SMTPServer } = require('smtp-server') as typeof import('smtp-server');
+  const { simpleParser } = require('mailparser') as typeof import('mailparser');
+  /* eslint-enable @typescript-eslint/no-require-imports */
+
   const username = 'testuser';
   const password = 'testpass';
   const received: ParsedMail[] = [];
@@ -51,9 +61,16 @@ export async function startSmtpTestServer(): Promise<SmtpTestServerHandle> {
     });
   });
 
-  return { server, host: '127.0.0.1', port, username, password, received };
+  return {
+    host: '127.0.0.1',
+    port,
+    username,
+    password,
+    received,
+    stop: () => new Promise<void>((resolve) => server.close(() => resolve())),
+  };
 }
 
 export function stopSmtpTestServer(handle: SmtpTestServerHandle): Promise<void> {
-  return new Promise((resolve) => handle.server.close(() => resolve()));
+  return handle.stop();
 }

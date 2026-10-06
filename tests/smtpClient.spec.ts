@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { SmtpClient } from '../src/email/smtpClient';
-import { startSmtpTestServer, stopSmtpTestServer, type SmtpTestServerHandle } from './support/smtpTestServer';
+import { startSmtpTestServer, stopSmtpTestServer, type SmtpTestServerHandle } from '../src/testing';
 
 let server: SmtpTestServerHandle;
 let client: SmtpClient;

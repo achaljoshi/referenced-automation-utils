@@ -1,4 +1,5 @@
 import * as nodemailer from 'nodemailer';
+import { adapterStep, type Adapter } from '../adapters/adapter';
 import type { SmtpConfig } from './emailUtils';
 
 export interface EmailMessage {
@@ -40,7 +41,8 @@ export interface SentEmail {
  * smtp.close();
  * ```
  */
-export class SmtpClient {
+export class SmtpClient implements Adapter {
+  readonly name = 'smtp';
   private readonly transporter: nodemailer.Transporter;
 
   constructor(config: SmtpConfig) {
@@ -49,11 +51,21 @@ export class SmtpClient {
 
   /** Verifies the connection/credentials without sending anything. */
   async verify(): Promise<boolean> {
-    return this.transporter.verify();
+    return adapterStep(this.name, 'verify', () => this.transporter.verify());
+  }
+
+  async healthCheck(): Promise<boolean> {
+    try {
+      return await this.verify();
+    } catch {
+      return false;
+    }
   }
 
   async send(message: EmailMessage): Promise<SentEmail> {
-    const info = await this.transporter.sendMail(message);
+    const info = await adapterStep(this.name, 'send', () => this.transporter.sendMail(message), {
+      details: { to: message.to, subject: message.subject },
+    });
     return {
       messageId: info.messageId,
       accepted: info.accepted as string[],

@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { SftpClient } from '../src/transfer/sftpClient';
-import { startSftpTestServer, stopSftpTestServer, type SftpTestServerHandle } from './support/sftpTestServer';
+import { startSftpTestServer, stopSftpTestServer, type SftpTestServerHandle } from '../src/testing';
 
 let server: SftpTestServerHandle;
 let client: SftpClient;
@@ -69,8 +69,8 @@ test.describe('SftpClient @smoke', () => {
     const byName = Object.fromEntries(entries.map((e) => [e.name, e]));
 
     expect(Object.keys(byName).sort()).toEqual(['one.txt', 'two.txt']);
-    expect(byName['one.txt'].type).toBe('-');
-    expect(byName['two.txt'].size).toBe(2);
+    expect(byName['one.txt']?.type).toBe('-');
+    expect(byName['two.txt']?.size).toBe(2);
   });
 
   test('delete() removes a real file from disk', async () => {
