@@ -26,7 +26,8 @@
     "format": "prettier --write .",
     "test": "playwright test",
     "pretest": "npm run build",
-    "prepack": "npm run build"
+    "prepack": "npm run build",
+    "security": "node dist/cli/auditGate.js && node dist/cli/scanSecrets.js"
   },
   "dependencies": {
     "@faker-js/faker": "^9.9.0",

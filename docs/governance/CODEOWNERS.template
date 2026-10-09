@@ -1,0 +1,15 @@
+# Copy to CODEOWNERS (or .gitlab/CODEOWNERS) in each repo and replace the placeholders with real people or groups.
+# GitLab uses this to require review (Settings > Merge requests > Approval rules > Code owners).
+# The owners are NOT filled in because they are your decision - nothing here has guessed at names.
+
+# Everything by default
+*                          @OWNER-OF-THIS-REPO
+
+# The parts where a mistake is most expensive
+/audit-allowlist.json      @SECURITY-REVIEWER
+/.secretscan-allow.json    @SECURITY-REVIEWER
+/.gitlab-ci.yml            @PLATFORM-OWNER
+/ci/                       @PLATFORM-OWNER
+/docs/adr/                 @ARCHITECTURE-REVIEWER
+/src/gui/bridgeScript.ts   @SECURITY-REVIEWER   # the script that runs on test machines
+/bridge/                   @SECURITY-REVIEWER
