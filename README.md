@@ -23,6 +23,7 @@ This is the one repo in the family with no dependencies of its own, so its `setu
 | `logger/logger` | Console + `logs/automation.log` logging (winston), plus `loggedStep()` to wrap any action with start/pass/fail logging. Reads correctly in a terminal **and** a raw CI log - see [Logging](#logging-local-and-ci). |
 | `logger/correlation` | A per-test correlation ID (`getCorrelationId`, `withCorrelationId`, `useTestCorrelation`) stamped on every log line and sent as `X-Correlation-Id` by the API client, so one failing flow can be grepped across the console, the API gateway and SAP. |
 | `adapters` (`Adapter`, `adapterStep`, `AdapterError`) | The contract every outside system (SMTP, SFTP, SQLite, SAP GUI) follows: a `name`, `healthCheck()`, `close()`, and every operation logged with timing and failures wrapped as `AdapterError('[sftp] upload failed: ...')`. Write a new client against it and it behaves like the rest. |
+| `mainframe` (`Tn3270Session`) | A 3270 terminal session over `s3270` (the scriptable emulator from the x3270 suite), with the waiting a hand-written script forgets: every Enter/PF key waits for the host to answer, reads are never of the previous screen, and a failure shows the screen as it was. See [Mainframe (3270)](#mainframe-3270). |
 | `testing` | In-process SMTP and SFTP servers for tests (`testing.startSmtpTestServer()`, `testing.startSftpTestServer()`), shared by every repo instead of copied into each. |
 | `playwright/config` (`createPlaywrightConfig`) | One Playwright config for the whole family: `BROWSER`/`DEVICE`/timeouts/reporters from `.env.<name>`, optional log-in-once `auth` project. Each repo's `playwright.config.ts` is now ~5 lines. See [Shared Playwright config](#shared-playwright-config). |
 | `crypto` | md5/sha1/sha256/sha512, hmac, base64, and `mask()` for logging sensitive values safely. |
@@ -66,6 +67,31 @@ async upload(local: string, remote: string) {
 ```
 
 That one wrapper gives every client the same behaviour: `[sftp] upload ... {"remote":"/in/a.csv"}` then `[sftp] upload ok (84ms)`, and on failure an `AdapterError('[sftp] upload failed: <reason>')` carrying the original as `cause`. `SmtpClient`, `SftpClient`, `SqliteClient` and the SAP GUI session (in `referenced-automation-sap`) all use it.
+
+## Mainframe (3270)
+
+```ts
+import { mainframe } from '@automation/referenced-automation-utils';
+
+const transport = new mainframe.S3270Transport({ command: env.getOptional('S3270_PATH') });   // needs the x3270 suite's s3270
+const term = await mainframe.Tn3270Session.connect(transport, { host: env.get('MAINFRAME_HOST'), port: 23 });
+
+await term.fillAfterLabel('USERID', env.get('MF_USER'));                    // finds the label, types in the field after it
+await term.fillAfterLabel('PASSWORD', env.get('MF_PASSWORD'), { secret: true });   // never logged
+await term.enter();                                                          // returns once the host has answered
+await term.waitForText('MAIN MENU');                                         // on timeout the error shows the screen as it was
+await term.fillAfterLabel('ACCOUNT NUMBER', '123456');
+await term.enter();
+const balance = await term.waitForText(/BALANCE\s+([\d,.]+ GBP)/);
+await term.pf(3);
+await term.close();
+```
+
+Why it is built this way: a 3270 host answers asynchronously and the screen **keeps showing the old content** until it does - the classic way a script misreads a screen or types into one that is still locked. So AID keys (Enter, PF, PA, Clear) wait for the keyboard to unlock, `screen()` always reads after that wait, and `waitForText` polls. Rows and columns in this API are 1-based (as on a screen); the emulator's are 0-based and converted for you.
+
+`mainframe.createSampleMainframe()` is an in-memory host (logon, menu, account inquiry; the keyboard locks after Enter and the old screen is shown until the host "answers"), so scripts can be tried and the session logic tested with no mainframe. It proves the session logic, **not** that a script matches your host.
+
+**Verified here** (no mainframe and no `s3270` on the build machine): the session logic against the simulator, including a negative control that shows a read straight after Enter returns the *previous* screen; and the `s3270` line protocol (a command per line in; `data:` lines, a status line and `ok`/`error` out) against a stand-in process that speaks it - sequential commands, error replies, timeouts, a crashed emulator. **Not verified:** a real `s3270` and a real host. The command syntax (`Connect(L:host:port)`, `Wait(seconds,Unlock)`, `MoveCursor(row,col)` 0-based, `Ascii`) and the 12-field status line were written from the x3270 scripting documentation and have not been run against the real program - install `s3270`, point `S3270_PATH` at it and try the logon above first. Batch/JES submission is not covered (use the SFTP/FTP client for file-based job interfaces).
 
 ## Test servers
 
