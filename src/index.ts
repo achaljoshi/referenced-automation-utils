@@ -23,3 +23,4 @@ export * as testing from './testing';
 export { createPlaywrightConfig } from './playwright/config';
 export type { CreatePlaywrightConfigOptions } from './playwright/config';
 export * as mainframe from './mainframe';
+export * as governance from './governance';

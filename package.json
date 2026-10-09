@@ -78,5 +78,10 @@
     "@playwright/test": {
       "optional": true
     }
+  },
+  "bin": {
+    "automation-audit-gate": "./dist/cli/auditGate.js",
+    "automation-scan-secrets": "./dist/cli/scanSecrets.js",
+    "automation-run-report": "./dist/cli/runReport.js"
   }
 }

@@ -88,11 +88,11 @@ test.describe('createPlaywrightConfig', () => {
     expect(browser?.testIgnore).toEqual(/auth\.setup\.ts/);
   });
 
-  test('always includes list, html and junit reporters; allure only when asked for and installed', () => {
+  test('always includes list, html, junit and json reporters; allure only when asked for and installed', () => {
     const names = (config: ReturnType<typeof createPlaywrightConfig>) => (config.reporter as unknown as [string, ...unknown[]][]).map((r) => r[0]);
-    expect(names(withEnv(clean, () => createPlaywrightConfig({ dir, allure: false })))).toEqual(['list', 'html', 'junit']);
+    expect(names(withEnv(clean, () => createPlaywrightConfig({ dir, allure: false })))).toEqual(['list', 'html', 'junit', 'json']);
     // The os.tmpdir() dir has no allure-playwright to resolve from, so it is skipped rather than crashing.
-    expect(names(withEnv(clean, () => createPlaywrightConfig({ dir })))).toEqual(['list', 'html', 'junit']);
+    expect(names(withEnv(clean, () => createPlaywrightConfig({ dir })))).toEqual(['list', 'html', 'junit', 'json']);
   });
 
   test('overrides are merged last', () => {

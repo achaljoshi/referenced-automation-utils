@@ -1,0 +1,11 @@
+{
+  "allow": [
+    {
+      "id": "GHSA-qxc2-j82w-r537",
+      "package": "@faker-js/faker",
+      "reason": "Fixed in @faker-js/faker 10.5+, which is ESM-only; this family compiles to CommonJS on Node >=18, so the upgrade needs an ESM migration. Nothing in the family's own code calls faker.helpers.fake(), but randomUtils re-exports the whole faker API, so a consuming project must not pass untrusted input to it.",
+      "owner": "UNASSIGNED - name a person or team",
+      "expires": "2027-03-31"
+    }
+  ]
+}

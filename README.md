@@ -130,9 +130,17 @@ All five repos must resolve **one** `playwright-core` (two copies mean two sets 
 3. `npx playwright install chromium` (browsers are per Playwright version).
 4. `npm ls playwright-core` must show one version, `deduped` everywhere.
 
-## Known advisory: `@faker-js/faker`
+## Dependency audit gate
 
-`npm audit` reports one advisory against `@faker-js/faker` v9. v10 fixes it but is ESM-only and this family compiles to CommonJS, so we stay on v9. `randomUtils` generates test data and never processes untrusted input, so the exposure is nil here; revisit when the family moves to ESM.
+`npx automation-audit-gate` runs `npm audit` and fails (exit 1) on any advisory at or above `--level` (default `high`) that is not covered by an **explicit, owned, expiring** entry in `audit-allowlist.json`:
+
+```json
+{ "allow": [ { "id": "GHSA-xxxx-xxxx-xxxx", "package": "name", "reason": "why this is acceptable", "owner": "team or person", "expires": "2027-03-31" } ] }
+```
+
+An exception stops protecting you on its expiry date, so an accepted risk has to be re-decided on purpose rather than forgotten; entries that match nothing any more are reported (`--strict-allowlist` fails on them), and an exception inside 30 days of expiry warns. Exit code 2 means the audit itself could not run (offline, no registry).
+
+**Currently accepted here:** `@faker-js/faker` GHSA-qxc2-j82w-r537 (high). The fix is v10.5+, which is ESM-only, and this family compiles to CommonJS on Node >=18, so it needs an ESM migration. Nothing in the family's own code calls `faker.helpers.fake()`, but `randomUtils` re-exports the whole faker API, so a project must not pass untrusted input to it. The entry has **no owner yet** and expires 2027-03-31 - name an owner in `audit-allowlist.json`.
 
 ## Environments
 

@@ -131,6 +131,8 @@ export function createPlaywrightConfig(options: CreatePlaywrightConfigOptions): 
     ['list'],
     ['html', { open: 'never' }],
     ['junit', { outputFile: 'test-results/junit.xml' }],
+    // machine-readable results for `automation-run-report` (flaky tests, slowest tests, history)
+    ['json', { outputFile: 'test-results/results.json' }],
   ];
   if ((options.allure ?? true) && allureInstalled(options.dir)) {
     // Raw results only - generating the viewable HTML report is a separate
