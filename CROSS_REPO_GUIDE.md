@@ -361,6 +361,7 @@ import {
   DbClient, SqliteClient,                   // DB
   emailUtils, SmtpClient,                   // one-shot vs pooled SMTP
   SftpClient,                               // WinSCP-equivalent SFTP client
+  placeholders,                             // ScenarioVariables: {{uuid}}, {{random:email}}, {{date:+7d}}, {{env:X}}
 } from '@automation/referenced-automation-utils';
 ```
 
@@ -390,17 +391,30 @@ import {
   paginateByPageNumber, paginateByCursor,
   MockServer, mockApiRoute, mockApiRoutes, unmockApiRoute,
   recordApiTraffic, playApiRecording,
-  test, expect,                                     // the apiClient/mockServer fixtures
+  OAuth2PasswordAuth, JwtAuth, HmacAuth, SessionCookieAuth, CompositeAuth,
+  pollUntil, mapConcurrent, CleanupRegistry, toCurl, maskFields,
+  registerApiSteps, registerDataSteps,              // Gherkin steps (playwright-bdd)
+  test, expect,                                     // apiClient / apiFor / cleanup / vars fixtures; expect has ApiResponse matchers
 } from '@automation/referenced-automation-api';
 ```
+
+The API package also ships `api-curl-to-playwright` (curl commands -> tests; `npx api-curl-to-playwright curl/ --out tests/generated`).
+Retries, polling, idempotency keys, downloads, GraphQL/SOAP and the exchange log are on `ApiClient`; see its `docs/PLAYWRIGHT_COVERAGE.md`.
 
 ### `@automation/referenced-automation-ui`
 
 ```ts
-import { step, test, expect, actions,
+import { step, test, guardedTest, expect, actions, locators, assertions,
+  dialogs, network, storage, emulation, clock, tabs, evaluate, visual, performance, guardPage,
   checkAccessibility, expectNoAccessibilityViolations, formatViolations,
+  registerUiSteps, registerDataSteps,                // Gherkin steps (playwright-bdd)
 } from '@automation/referenced-automation-ui';
 ```
+
+The UI package also ships `ui-codegen-to-playwright` (a `playwright codegen` recording -> a test in this style; `--page-objects`,
+`--data`). Beyond `actions` it covers dialogs, network mocking/HAR/WebSocket, storage and a second signed-in user, emulation,
+clock, tabs, evaluate, ARIA/visual snapshots, performance budgets and a page guard; `docs/PLAYWRIGHT_COVERAGE.md` maps each
+to Playwright's documentation.
 
 `actions` is a namespace of ~35 standalone functions covering everything a
 page object needs - navigation, element interaction, reads, waits,
