@@ -55,7 +55,7 @@
     "uuid": "^11.1.1"
   },
   "devDependencies": {
-    "@playwright/test": "^1.62.1",
+    "@playwright/test": "^1.64.0",
     "@types/better-sqlite3": "^7.6.13",
     "@types/js-yaml": "^4.0.9",
     "@types/lodash": "^4.17.25",
@@ -73,7 +73,7 @@
     "typescript": "^5.7.3"
   },
   "peerDependencies": {
-    "@playwright/test": ">=1.62.1 <2.0.0"
+    "@playwright/test": ">=1.64.0 <2.0.0"
   },
   "peerDependenciesMeta": {
     "@playwright/test": {
