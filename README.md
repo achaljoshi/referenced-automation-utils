@@ -25,6 +25,7 @@ This is the one repo in the family with no dependencies of its own, so its `setu
 | `adapters` (`Adapter`, `adapterStep`, `AdapterError`) | The contract every outside system (SMTP, SFTP, SQLite, SAP GUI) follows: a `name`, `healthCheck()`, `close()`, and every operation logged with timing and failures wrapped as `AdapterError('[sftp] upload failed: ...')`. Write a new client against it and it behaves like the rest. |
 | `mainframe` (`Tn3270Session`) | A 3270 terminal session over `s3270` (the scriptable emulator from the x3270 suite), with the waiting a hand-written script forgets: every Enter/PF key waits for the host to answer, reads are never of the previous screen, and a failure shows the screen as it was. See [Mainframe (3270)](#mainframe-3270). |
 | `testing` | In-process SMTP and SFTP servers for tests (`testing.startSmtpTestServer()`, `testing.startSftpTestServer()`), shared by every repo instead of copied into each. |
+| `placeholders` (`ScenarioVariables`, `randomValue`, `relativeDate`) | `{{name}}`, `{{env:X\|fallback}}`, `{{uuid}}`, `{{random:email}}`, `{{date:+7d}}` placeholders for unique/fresh/env-driven test data; fails loudly when one cannot be resolved. See [Placeholders](#placeholders-for-test-data). |
 | `playwright/config` (`createPlaywrightConfig`) | One Playwright config for the whole family: `BROWSER`/`DEVICE`/timeouts/reporters from `.env.<name>`, optional log-in-once `auth` project. Each repo's `playwright.config.ts` is now ~5 lines. See [Shared Playwright config](#shared-playwright-config). |
 | `crypto` | md5/sha1/sha256/sha512, hmac, base64, and `mask()` for logging sensitive values safely. |
 | `dateUtils` | Thin `dayjs`-based helpers: format/parse, add days/months/hours/minutes, diff, compare, epoch conversion. |
@@ -111,6 +112,10 @@ export default createPlaywrightConfig({ dir: __dirname, name: '@automation/my-pr
 ```
 
 Everything else comes from `.env.<name>` or the environment (`BROWSER`, `DEVICE`, `HEADLESS`, `WORKERS`, `RETRIES`, `TEST_TIMEOUT_MS`, ...; the full list is in the function's doc comment). An unknown `BROWSER` fails immediately with the valid names instead of silently running chromium. Log in once and reuse it everywhere with `auth: { setupMatch: /auth\.setup\.ts/, storageState: AUTH_FILE }` - see `referenced-automation-ui-api` for a working example.
+
+## Placeholders for test data
+
+`placeholders.ScenarioVariables` is a scenario's named values plus `{{...}}` placeholders, for data that must be unique, fresh or environment-driven instead of hard-coded: `{{name}}` (a saved value), `{{env:NAME|fallback}}`, `{{uuid}}`, `{{timestamp}}`, `{{random:email}}` / `alnum(8)` / `number(1,100)`, `{{date:+7d}}` / `{{date:-1M|DD/MM/YYYY}}`. An unresolvable placeholder throws and names what is known - it is never sent to a system as literal text. The UI and API packages use it for their Gherkin steps and test fixtures (`vars`); it has nothing to do with BDD itself and works in any test.
 
 ## No waits in tests
 

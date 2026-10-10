@@ -12,6 +12,8 @@
 - **Governance tools**: `automation-audit-gate` (exceptions that are owned, reasoned and expire), `automation-scan-secrets` (includes SAP recordings; never prints a secret), `automation-run-report` (failures, flaky and slowest tests, repeat offenders).
 - Shared GitLab CI template with sharding and report merging (`ci/templates/`), ADRs 0001-0009, contributing/releasing guides.
 
+- **`placeholders`**: `ScenarioVariables` and `{{name}}`, `{{env:X|fallback}}`, `{{uuid}}`, `{{random:email}}`, `{{date:+7d}}` placeholders for unique/fresh/env-driven test data (unresolvable ones fail loudly), shared by the UI and API frameworks.
+
 ### Changed
 - **Playwright 1.64.0** (was 1.62.1): the `@playwright/test` / `playwright-core` floor is `^1.64.0` and the peer range is `>=1.64.0 <2.0.0` where the package declares one; run `npx playwright install chromium` after upgrading.
 - The shared config now also writes `test-results/results.json` (read by `automation-run-report`).
