@@ -10,4 +10,4 @@ npm run lint && npm run typecheck && npm test && npm run security
 ```
 Build first (`npm run build`): the CLIs and the stand-in bridges the tests use run from `dist/`.
 
-Update `CHANGELOG.md`. This repo is in the chain `utils` -> `api`/`ui` -> `sap` -> `ui-api`: a change here must be repackaged (`./scripts/create-package.sh`) and re-tested in every repo above it.
+Update `CHANGELOG.md`. This repo is in the chain `utils` -> `api`/`ui` -> `sap` -> `ui-api`: a change here is released as a new version (`./scripts/publish-package.sh`, see the README: "Publishing a package to the registry") and every repo above it moves to that version in its `package.json` (README: "Upgrading a package") and is re-tested.

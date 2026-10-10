@@ -1,6 +1,6 @@
 # 0002. Shared code is distributed as versioned packages
 
-- **Status:** Accepted for the interim (tarballs); the target (an internal npm registry) is pending the platform team
+- **Status:** Superseded by [0010](0010-packages-installed-by-version-from-the-registry.md) (the interim `file:` tarballs described here are now the opt-in local mode)
 - **Date:** 2026-10-10
 - **Approved by:** _not yet recorded_
 

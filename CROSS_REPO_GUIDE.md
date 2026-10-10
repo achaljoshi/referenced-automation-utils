@@ -7,16 +7,16 @@ override fixtures/methods, and everything else a new joiner needs to get
 productive. Each repo's own `README.md` documents *that repo's* features in
 depth - this guide is the map that ties all five together.
 
-If you only read one section, read [Build, package, consume: the day-to-day loop](#5-build-package-consume-the-day-to-day-loop)
+If you only read one section, read [Build, package, consume: the day-to-day loop](#5-day-to-day-change-a-shared-package-upgrade-a-consumer)
 and [New joiner checklist](#16-new-joiner-checklist).
 
 ## Table of contents
 
 1. [The repo family at a glance](#1-the-repo-family-at-a-glance)
 2. [One-time machine setup](#2-one-time-machine-setup)
-3. [Cloning and bootstrapping all five repos from scratch](#3-cloning-and-bootstrapping-all-five-repos-from-scratch)
-4. [How cross-repo code sharing actually works](#4-how-cross-repo-code-sharing-actually-works)
-5. [Build, package, consume: the day-to-day loop](#5-build-package-consume-the-day-to-day-loop)
+3. [Cloning and bootstrapping the repos](#3-cloning-and-bootstrapping-the-repos)
+4. [How cross-repo code sharing works](#4-how-cross-repo-code-sharing-works)
+5. [Day to day: change a shared package, upgrade a consumer](#5-day-to-day-change-a-shared-package-upgrade-a-consumer)
 6. [Environment configuration](#6-environment-configuration)
 7. [What you can import from each package](#7-what-you-can-import-from-each-package)
 8. [Using fixtures in your tests](#8-using-fixtures-in-your-tests)
@@ -71,8 +71,9 @@ consumers.
   `"engines": { "node": ">=18" }`). You may see an `EBADENGINE` warning about
   `eslint-visitor-keys` wanting a newer Node - this is cosmetic and safe to
   ignore.
-- **Sibling checkout layout is required.** All five repos, plus a
-  `shared-packages` folder that gets created automatically, must live next to
+- **Sibling checkout layout (for local mode and for working across repos).**
+  When you use `setup.sh --local` or change shared code, the repos, plus a
+  `shared-packages` folder that gets created automatically, live next to
   each other under the same parent directory:
 
   ```
@@ -85,25 +86,23 @@ consumers.
   └── shared-packages/          <- created by the build scripts, not checked out
   ```
 
-  Every `scripts/setup.sh`/`scripts/create-package.sh` script assumes this
-  layout (`../shared-packages`, `../referenced-automation-<name>`). Cloning
-  the repos anywhere else, or nested inside each other, breaks the bootstrap
-  scripts.
-- **Restricted/offline network (e.g. a Windows RDP box with no direct
-  internet):** `npm` should point at your org's internal Artifactory/Nexus
-  npm registry instead of the public registry - ask your team lead for the
-  registry URL and whether anonymous read access is enabled, since the exact
-  setup is org-specific and shouldn't be hardcoded here. If Playwright's own
-  browser binaries aren't downloadable in that environment, use a
-  system-installed browser instead of Playwright's bundled ones (see
-  `referenced-automation-ui`'s README, `BROWSER=msedge`/`BROWSER=chrome`, and
-  `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1`).
+  The `--local` scripts assume this layout (`../shared-packages`,
+  `../referenced-automation-<name>`). Cloning the repos anywhere else, or
+  nested inside each other, breaks them.
+- **Registry.** The `@automation/*` packages are installed **by version** from
+  your organisation's npm registry (Artifactory). Set its address once in the
+  `NPM_REGISTRY_URL` variable (your shell profile, or a CI/CD variable): every
+  `scripts/setup.sh`/`setup.bat` then runs
+  `npm config set registry "$NPM_REGISTRY_URL"` before any other npm command.
+  The URL is org-specific and is never hard-coded in these repos; ask your team
+  lead for it. If Playwright's own browser binaries aren't downloadable in a
+  restricted environment, use a system-installed browser instead of Playwright's
+  bundled ones (see `referenced-automation-ui`'s README,
+  `BROWSER=msedge`/`BROWSER=chrome`, and `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1`).
 
-## 3. Cloning and bootstrapping all five repos from scratch
+## 3. Cloning and bootstrapping the repos
 
-Order matters only in the sense that `utils` has to be *buildable* before
-anything else - but you don't have to build it manually, because every other
-repo's `setup.sh` does that for you automatically. Clone all five first:
+Clone the repo(s) you work in (all five if you want to change shared code):
 
 ```bash
 mkdir Projects && cd Projects
@@ -114,129 +113,175 @@ git clone <url>/referenced-automation-sap.git
 git clone <url>/referenced-automation-ui-api.git
 ```
 
-Then bootstrap each one. You can do this in any order - each repo's
-`setup.sh` checks whether the tarballs it depends on already exist in
-`../shared-packages`, and if not, builds them itself from the sibling
-checkout:
+Then, in each repo you use:
 
 ```bash
-cd referenced-automation-utils && ./scripts/setup.sh && cd ..
-cd referenced-automation-api   && ./scripts/setup.sh && cd ..
-cd referenced-automation-ui    && ./scripts/setup.sh && cd ..
-cd referenced-automation-sap   && ./scripts/setup.sh && cd ..
-cd referenced-automation-ui-api && ./scripts/setup.sh && cd ..
+export NPM_REGISTRY_URL="<your registry URL>"     # Windows cmd: set NPM_REGISTRY_URL=<your registry URL>
+./scripts/setup.sh                                 # Windows: scripts\setup.bat
 ```
 
-(On Windows, use `scripts\setup.bat` instead of `./scripts/setup.sh`.)
-
-What each `setup.sh` actually does:
+What each `setup.sh` does - the first step is always the registry:
 
 | Repo | Steps |
 |---|---|
-| `utils` | `npm ci`. No sibling packages, no browser install (pure Node, no browser automation here). |
-| `api` | Ensures `utils`'s tarball exists in `../shared-packages` (builds it from `../referenced-automation-utils` if not), then `npm ci`. No browser install (API-only). |
-| `ui` | Same `utils` bootstrap, then `npm ci`, then `npx playwright install --with-deps` (all 3 browsers) unless `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` is set. |
-| `sap` | Ensures `utils` **then** `ui` tarballs exist (in that order - `ui`'s own build needs `utils` already packaged), then `npm ci`, then `playwright install --with-deps chromium` only. |
-| `ui-api` | Ensures `utils`, `api`, `ui` tarballs exist, then `npm ci`, then full browser install. |
+| `utils` | `npm config set registry "$NPM_REGISTRY_URL"`, `npm ci`. No browser install (pure Node). |
+| `api` | Registry, then `npm ci` (`@automation/referenced-automation-utils` comes from the registry, at the version in `package.json`). No browser install. |
+| `ui` | Registry, `npm ci` (utils, api from the registry), then `npx playwright install --with-deps` (all 3 browsers) unless `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1`. |
+| `sap` | Registry, `npm ci` (utils, ui from the registry), then `playwright install --with-deps chromium` only. |
+| `ui-api` | Registry, `npm ci` (utils, api, ui, sap from the registry), then the full browser install. |
 
-If a sibling tarball is missing **and** the sibling repo isn't checked out
-next to this one, `setup.sh` fails with a clear error telling you which repo
-to clone and where.
+If `NPM_REGISTRY_URL` is not set, the script says so and npm keeps the registry
+it is already configured with. If `npm ci` stops on an `@automation/*` package,
+that version is not in the registry yet: publish it (section 4) or use
+`./scripts/setup.sh --local` (section 4), which builds the packages from
+sibling checkouts instead and fails with a clear message naming the repo to
+clone if one is missing.
 
-## 4. How cross-repo code sharing actually works
+(On Windows, use `scripts\setup.bat` instead of `./scripts/setup.sh`.)
 
-There's no private npm registry (Nexus/Artifactory publish) wired up for
-these packages yet, so sharing works via **locally-built tarballs** instead -
-the same idea as `mvn install`ing a Maven module to your local `.m2` repo
-before another module can depend on it, just with npm's `npm pack` instead.
+## 4. How cross-repo code sharing works
 
-1. Each shared repo (`utils`, `api`, `ui`, `sap`) has a `scripts/create-package.sh`
-   (and `.bat`) that runs, in order: `npm ci` → `npm run clean` → `npm run build`
-   → `npm pack` → moves the resulting `.tgz` into `../shared-packages/`.
-2. A consuming repo's `package.json` points at that exact file:
+The four shared repos (`utils`, `api`, `ui`, `sap`) are npm packages named
+`@automation/referenced-automation-<name>`. A consuming repo lists them in
+`package.json` like any other dependency, **by version**:
 
-   ```jsonc
-   "dependencies": {
-     "@automation/referenced-automation-utils": "file:../shared-packages/automation-referenced-automation-utils-1.0.0.tgz"
-   }
+```jsonc
+"dependencies": {
+  "@automation/referenced-automation-utils": "^1.0.0"
+}
+```
+
+`npm ci`/`npm install` downloads that version from the registry set by
+`npm config set registry "$NPM_REGISTRY_URL"` (which every `setup` script runs
+first). Nothing is built, copied or placed by hand, and upgrading is a
+one-line change (section 5). Everything below follows from that.
+
+### 4.1 Publishing a package to the registry (JFrog Artifactory)
+
+A version has to be published before anyone can ask for it. In the repo that
+owns the package (`utils`, `api`, `ui` or `sap`):
+
+1. **Registry URL:** the npm registry URL of your Artifactory, the same one as
+   the `NPM_REGISTRY_URL` CI/CD variable. Not hard-coded anywhere; ask your
+   platform team.
+2. **Permission:** you need an npm identity that may deploy to that repository.
+   How npm authenticates against your Artifactory is your organisation's own
+   procedure and is not described here; the scripts never log in for you.
+3. **Version:** every version can be published once. Bump it and note it in
+   the changelog, then commit:
+   ```bash
+   npm version patch --no-git-tag-version      # or minor / major
    ```
+4. **Publish** (a dry run first):
+   ```bash
+   export NPM_REGISTRY_URL="<your registry URL>"
+   ./scripts/publish-package.sh --dry-run       # Windows: scripts\publish-package.bat --dry-run
+   ./scripts/publish-package.sh
+   ```
+   `publish-package` sets the registry, builds with `create-package.sh`
+   (`npm ci`, `npm run clean`, `npm run build`, `npm pack`) and runs
+   `npm publish <tarball> --registry "$NPM_REGISTRY_URL"`. It stops with a
+   message if `NPM_REGISTRY_URL` is not set.
+5. **Verify:** `npm view @automation/referenced-automation-<name> versions --registry "$NPM_REGISTRY_URL"`.
 
-3. `npm ci`/`npm install` in the consuming repo then installs straight from
-   that tarball, exactly like it would from a real registry.
+**Without the script:** `./scripts/create-package.sh` writes
+`../shared-packages/automation-referenced-automation-<name>-<version>.tgz` -
+exactly what `npm publish` uploads. Publish that file with `npm publish <file>
+--registry "$NPM_REGISTRY_URL"`, or deploy the file through the Artifactory web
+UI (the repository's **Deploy** action reads the name and version from the
+tarball), or give it to whoever manages the repository.
 
-**Filename gotcha worth knowing:** because the package name is scoped
-(`@automation/referenced-automation-utils`), `npm pack` produces a tarball
-named `automation-referenced-automation-utils-1.0.0.tgz` (npm flattens the
-scope into the filename with an `automation-` prefix). The comment header
-inside each `create-package.sh` shows an example filename *without* that
-prefix - that comment is stale/inaccurate; trust the actual `package.json`
-`dependencies` entries and the real file that lands in `shared-packages/`,
-not the script's header comment.
+**Order:** publish `utils` first, then `api` and `ui`, then `sap`, then use the
+new versions in the repos that consume them. `ui-api` is `"private": true`, has
+no `create-package.sh` and is never published.
 
-`ui-api` has no `create-package.sh` of its own - nothing is meant to depend
-on it (it's `"private": true`, a leaf demo repo).
+(Filename note: because the package is scoped, `npm pack` names the file
+`automation-referenced-automation-<name>-<version>.tgz`.)
 
-**Path to a real registry later:** once a private npm registry (Nexus/
-Artifactory) is available, the exact same tarball `npm pack` produces is what
-gets `npm publish`ed there. At that point, consumers switch from
-`"file:../shared-packages/...tgz"` to a normal version range
-(`"^1.0.0"`) and point `.npmrc` at the registry - nothing about the package
-source itself changes.
+### 4.2 Using a package without a registry (local generation)
 
-## 5. Build, package, consume: the day-to-day loop
+When the registry does not have the version yet, or you want to try a change
+before publishing it. `package.json` and the lockfile are not touched.
 
-This is the workflow you'll use constantly: you change something in a shared
-repo (say, `utils` or `ui`) and need every dependent repo to see it.
+**Automatic** - repos checked out as siblings under one parent directory:
 
-**Step 1 - make your change and verify it in the repo you edited:**
+```bash
+./scripts/setup.sh --local        # Windows: scripts\setup.bat --local   (or USE_LOCAL_PACKAGES=1)
+```
+
+It runs `create-package.sh --local` in each sibling this repo depends on
+(`--local` builds that sibling's own dependencies in turn, without needing the
+registry), keeps the `.tgz` files in `../shared-packages` (created if missing),
+and runs `npm install --no-save` on them.
+
+**Manual** - generate the tarball, place it yourself:
+
+```bash
+(cd ../referenced-automation-utils && ./scripts/create-package.sh --local)    # one per needed package
+# optional: copy the .tgz into the consuming repo, e.g. into libs/ (keep it out of git)
+npm install --no-save ../shared-packages/automation-referenced-automation-utils-<version>.tgz
+```
+
+List **all** the `@automation/*` tarballs the repo needs in the one command.
+`--no-save` keeps `package.json` and the lockfile unchanged; run the command
+again after every `npm ci` (which removes what the lockfile does not list) and
+after rebuilding a tarball with the same version. `npm ci` takes you back to
+the registry versions.
+
+`ui-api` has no `create-package.sh` of its own - nothing depends on it.
+
+## 5. Day to day: change a shared package, upgrade a consumer
+
+You change something in a shared repo (say `utils`) and want its consumers to
+use it. With a registry this is publish + one version line:
+
+**Step 1 - change and verify in the repo you edited:**
 
 ```bash
 cd referenced-automation-utils
 # edit src/...
-npm run build   # tsc -p tsconfig.build.json
-npm run lint
-npm test
+npm run build && npm run lint && npm test
 ```
 
-**Step 2 - repackage it:**
+**Step 2 - release a new version:** bump `version` (`npm version minor
+--no-git-tag-version`), add the changelog entry, commit, then publish it
+(section 4.1). `create-package.sh` runs `npm run clean` before `npm run build`
+because `tsc`'s incremental compiler does not delete output for source files you
+deleted or renamed - never package from a bare `npm run build`.
+
+**Step 3 - upgrade each direct consumer by changing one version.** In
+`referenced-automation-api`'s `package.json`:
+
+```jsonc
+"@automation/referenced-automation-utils": "^1.1.0"     // was ^1.0.0
+```
 
 ```bash
-./scripts/create-package.sh
-# writes ../shared-packages/automation-referenced-automation-utils-1.0.0.tgz
+npm install            # downloads 1.1.0 from the registry in NPM_REGISTRY_URL and updates package-lock.json
+npm run build && npm run lint && npm test
+git add package.json package-lock.json
 ```
 
-`create-package.sh` runs `npm run clean` before `npm run build` - this
-matters because `tsc`'s incremental compiler does **not** delete output files
-for source files you deleted or renamed. Skipping `clean` can silently ship a
-stale file in the tarball that no longer has a corresponding source file.
-Always use `create-package.sh` (or `npm run clean && npm run build`
-manually) rather than a bare `npm run build` when you're about to package.
+- `^1.1.0` accepts any `1.x` from 1.1.0 up; write `1.1.0` to pin exactly.
+- `npm ci` (CI, `setup.sh`) installs exactly what the lockfile records, so a
+  version only changes when someone commits the change. **Do not delete
+  `package-lock.json`** - without it every dependency, Playwright included,
+  floats to whatever is newest.
+- The committed lockfiles record each `@automation/*` version but not its
+  download address; the first `npm install` against the real registry adds the
+  address and checksum (`resolved`, `integrity`) - commit that.
+- If the consumer is itself shared (`ui`, which `sap` and `ui-api` use),
+  publish it, then repeat for the next level down:
+  `utils` -> `api`/`ui` -> `sap` -> `ui-api`.
 
-**Step 3 - pull the new tarball into every repo that depends on it:**
+**Trying a change before publishing:** use local generation (section 4.2) and
+test against it; publish when you are happy. In local mode, rebuild with
+`create-package.sh --local` and re-run `npm install --no-save <tgz>` after each
+change (same version, new contents).
 
-```bash
-cd ../referenced-automation-api   # or ui, sap, ui-api
-rm -rf node_modules
-npm install ../shared-packages/automation-referenced-automation-utils-1.0.0.tgz
-```
-
-Why `rm -rf node_modules` first: npm's `file:` dependencies are pinned by an
-integrity hash captured in `package-lock.json` at install time. If the
-tarball's *filename and version* haven't changed but its *contents* have
-(exactly what happens when you edit `utils` and repackage it without bumping
-the version), a plain `npm ci`/`npm install` can silently keep serving the
-old cached copy instead of picking up your changes. Removing `node_modules`
-and reinstalling from the tarball path forces npm to re-read the actual file
-and update the lockfile's integrity hash.
-
-**Step 4 - rebuild and retest the consumer** (repeat Step 1's `build`/`lint`/`test`
-in the consuming repo). If the consumer is itself a shared package (e.g. you
-changed `utils` and are now updating `ui`, which `sap`/`ui-api` also depend
-on), repeat this whole loop one level further down the dependency graph.
-
-In short: **edit → build/test in place → `create-package.sh` → reinstall in
-every direct consumer → build/test each consumer → repeat downstream if the
-consumer is itself shared.**
+In short: **edit -> build/test in place -> bump version -> publish -> change
+the version in each consumer's `package.json` -> `npm install` -> build/test ->
+repeat downstream.**
 
 ## 6. Environment configuration
 
@@ -791,21 +836,20 @@ manual "Run pipeline" from the GitLab UI, using Microsoft's official
 Playwright Docker image (browsers preinstalled, no `playwright install`
 needed in CI). Stages:
 
-1. **build** - clones/packages `utils` via the exact same `create-package.sh`
-   a developer runs locally (so CI and local setup never diverge), then
-   `npm ci`, `npm run build`, `npm run lint`.
+1. **build** - `npm ci` (the `@automation/*` packages by version, from the
+   registry in the `NPM_REGISTRY_URL` CI/CD variable - the jobs run
+   `npm config set registry` first and clone nothing), `npm run build`,
+   `npm run lint`.
 2. **test** - a `chromium`/`firefox`/`webkit` matrix, plus a separate
    accessibility job (`tests/accessibility.spec.ts`). Publishes JUnit +
    Allure results + `test-results`/`playwright-report`/`logs` as artifacts.
 3. **report** - generates the Allure HTML report and publishes it to GitLab
    Pages, only on the default branch.
 
-The pipeline assumes `utils` lives in the same GitLab group/namespace as
-`ui` (`UTILS_REPO_URL` derived from `$CI_PROJECT_NAMESPACE`); override it as
-a CI/CD variable if your GitLab layout differs. `api`, `sap`, and `ui-api`
-don't have their own `.gitlab-ci.yml` yet - copy `ui`'s as a starting point
-when you set one up, adjusting the sibling-package bootstrap list for that
-repo's actual dependencies.
+Set `NPM_REGISTRY_URL` as a CI/CD variable (Settings -> CI/CD -> Variables)
+and make sure the versions in `package.json` are published (section 4.1).
+`api`, `sap`, and `ui-api` carry their own `.gitlab-ci.yml` with the same
+shape.
 
 ## 14. IDE setup
 
@@ -823,26 +867,30 @@ Every repo ships the same baseline:
 ## 15. Troubleshooting / known gotchas
 
 - **`npm install <tarball> -D` moved a runtime dependency to devDependencies**:
-  don't pass `-D` for the `@automation/*` tarballs - they are dependencies of
+  don't pass `-D` for the `@automation/*` packages - they are dependencies of
   `sap`/`ui`/`api`, and under `-D` they'd be missing for whoever installs them.
 - **"Executable doesn't exist" after a Playwright upgrade**: browsers are per
   Playwright version - run `npx playwright install chromium`. More than one
   `playwright-core` in `npm ls playwright-core` is the usual root cause; see
   utils README > "Bumping Playwright".
 - **`(req) => ...` is implicitly `any` in my test**: fixed in `api` (types were
-  collapsing to `unknown`); refresh the `api` tarball. Playwright does not
+  collapsing to `unknown`); upgrade `api` to the fixed version. Playwright does not
   type-check tests, so run `npm run typecheck` (in `api`/`ui-api`).
 - **`EBADENGINE` warning during `npm install`**: cosmetic (an ESLint
   transitive dependency wants a newer Node than `engines` requires) - safe
   to ignore.
-- **A change to a shared repo "isn't showing up" in a consumer**: you almost
-  certainly need to `npm install <tarball path>` in the consumer after
-  repackaging (that refreshes the lockfile's integrity hash; **don't delete
-  `package-lock.json`** - without it every dependency, Playwright included,
-  floats to whatever is newest). If it still serves the old copy,
-  `rm -rf node_modules` first - see [Build, package, consume: the day-to-day loop](#5-build-package-consume-the-day-to-day-loop).
-  A plain `npm ci` can serve a stale cached copy since the tarball's
-  filename/version don't change between edits.
+- **A change to a shared repo "isn't showing up" in a consumer**: with the
+  registry, the new version must be **published** and the consumer's
+  `package.json` changed to it, then `npm install` (section 5). **Don't delete
+  `package-lock.json`.** In local mode, rebuild with `create-package.sh --local`
+  and run `npm install --no-save <tgz>` again; if npm still serves the old copy,
+  `rm -rf node_modules` first, then install again.
+- **`npm ci` fails with "No matching version found for @automation/..."**: that
+  version is not in the registry `npm config get registry` shows. Check
+  `NPM_REGISTRY_URL`, publish the package (section 4.1), or use
+  `./scripts/setup.sh --local`.
+- **`npm publish` says the version already exists**: versions are immutable;
+  bump the version and publish again.
 - **A rebuilt tarball still contains a file you deleted from source**: you
   (or a script) skipped `npm run clean` before `npm run build`. `tsc`'s
   incremental compiler doesn't delete orphaned output files. Always use
@@ -865,22 +913,17 @@ Every repo ships the same baseline:
   `ui`/`sap`) instead of Playwright's bundled binaries, and set
   `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` so `npm install` doesn't even attempt
   the download.
-- **The tarball filename in a `create-package.sh` header comment doesn't
-  match the real file in `shared-packages/`**: known, see the
-  [filename gotcha](#4-how-cross-repo-code-sharing-actually-works) above -
-  trust `package.json`'s `dependencies` entries, not the script comment.
 
 ## 16. New joiner checklist
 
 - [ ] Node ≥ 18 and npm installed; `npm config get registry` points at your
-      org's registry if you're on a restricted network.
-- [ ] All five repos cloned as **siblings** under one parent directory (not
-      nested, not scattered).
-- [ ] Ran `./scripts/setup.sh` (or `.bat`) in each repo - or at minimum in
-      the one(s) you'll actually work in; each one bootstraps its own
-      dependencies automatically.
-- [ ] Confirmed `../shared-packages/` now contains a `.tgz` for every repo
-      your working repo depends on.
+      org's registry (`NPM_REGISTRY_URL` is set; `setup.sh` runs the
+      `npm config set registry` for you).
+- [ ] `NPM_REGISTRY_URL` set, and `./scripts/setup.sh` (or `.bat`) run in each
+      repo you'll work in. For local-only work, the repos cloned as
+      **siblings** under one parent directory and `./scripts/setup.sh --local`.
+- [ ] Know how to publish a package (section 4.1) and how to upgrade one
+      (section 5: change the version in `package.json`, `npm install`).
 - [ ] Created your own `.env.<env>.local` in any repo where you need real
       credentials the committed `.env.<env>` files don't include (never
       commit this file).
@@ -888,13 +931,12 @@ Every repo ships the same baseline:
 - [ ] Read this repo's own README's "Where connection details actually
       live" section - never add a real host/credential to `utils`, `api`,
       or `ui` directly.
-- [ ] Understand the build → package → consume loop (section 5) - you'll use
-      it every time you change a shared repo.
+- [ ] Understand the publish → upgrade loop (section 5) - you'll use it every
+      time you change a shared repo.
 - [ ] Know where to look for each repo's own detailed README (fixtures,
       device emulation, accessibility, Allure, CI) - this guide is the map,
       not a replacement for those.
-- [ ] Asked your team lead about: the real Artifactory/Nexus registry URL
-      (if on a restricted network), where a real GitLab CI pipeline for
-      `api`/`sap`/`ui-api` should live if/when one gets added, and the
+- [ ] Asked your team lead about: the Artifactory registry URL and who may
+      publish to it, and the
       commit convention for this codebase (see each repo's recent git log
       for style).

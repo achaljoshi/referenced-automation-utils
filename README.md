@@ -13,7 +13,7 @@ Nothing in here depends on Playwright or a browser - it is pure Node/TypeScript,
 npm test                # runs this package's own unit tests
 ```
 
-This is the one repo in the family with no dependencies of its own, so its `setup.sh`/`setup.bat` are the plain case. `referenced-automation-api`, `-ui`, `-ui-api`, and `-sap` all depend on this package and their own `setup.sh`/`setup.bat` build it automatically from a sibling checkout if it isn't already packaged - see any of their READMEs for that flow. For a fresh clone of the whole family, check out all five repos next to each other in the same parent directory first.
+`setup.sh`/`setup.bat` run `npm ci`. They first run `npm config set registry "$NPM_REGISTRY_URL"` when that variable is set, so every package is fetched from your organisation's npm registry (see [Publishing a package](#publishing-a-package-to-the-registry-jfrog-artifactory)). This package has no `@automation/*` dependencies of its own.
 
 ## What's included
 
@@ -231,25 +231,61 @@ await sftp.close();
 
 `SftpClient` deliberately isn't a wrapper around the real `winscp.com` executable - that would only work on a machine with WinSCP already installed (fine for a Windows RDP box, but not for macOS/Linux dev machines or a GitLab CI Linux runner). It's a pure Node.js SFTP implementation instead, so the same test runs identically everywhere this framework runs. `tests/support/sftpTestServer.ts` and `tests/support/smtpTestServer.ts` are real, minimal, in-process SFTP/SMTP servers - not stubs - used to test both clients against actual protocol traffic; see `tests/sftpClient.spec.ts` / `tests/smtpClient.spec.ts` for the full working examples.
 
-## Distributing this package (no registry yet)
+## Publishing a package to the registry (JFrog Artifactory)
 
-Until a private npm registry (e.g. Nexus) is wired up, build a versioned tarball locally and hand it out - either by copying it to a shared folder every consuming repo can read, or by giving it directly to DevOps to publish:
+The other repos install `@automation/referenced-automation-utils` **by version** from your organisation's npm registry, so each new version has to be published there. In order:
+
+1. **Know the registry URL.** It is the npm registry URL of your Artifactory - the one in your `~/.npmrc` and in the `NPM_REGISTRY_URL` CI/CD variable. This repo never hard-codes it; ask your platform team if you do not have it.
+2. **Be allowed to publish.** Publishing needs an npm identity with deploy permission on that repository. How you authenticate npm against your Artifactory is your organisation's own procedure and is not covered here - the scripts in this repo never log in for you.
+3. **Choose the version and record it.** A version can be published only once:
+   ```bash
+   npm version patch --no-git-tag-version      # or minor / major - changes package.json only
+   ```
+   Add the change to `CHANGELOG.md` and commit both.
+4. **Point the scripts at the registry** (once per terminal):
+   ```bash
+   export NPM_REGISTRY_URL="<your registry URL>"        # Windows cmd: set NPM_REGISTRY_URL=<your registry URL>
+   ```
+5. **Publish** - a dry run first:
+   ```bash
+   ./scripts/publish-package.sh --dry-run     # builds the package and lists what would be uploaded
+   ./scripts/publish-package.sh               # uploads it            (Windows: scripts\publish-package.bat)
+   ```
+   The script runs `npm config set registry "$NPM_REGISTRY_URL"`, builds with `create-package.sh` (clean, build, `npm pack`) and runs `npm publish <the .tgz> --registry "$NPM_REGISTRY_URL"`.
+6. **Check it arrived:** `npm view @automation/referenced-automation-utils versions --registry "$NPM_REGISTRY_URL"` lists the new version.
+
+**Without the script.** `./scripts/create-package.sh` leaves `../shared-packages/automation-referenced-automation-utils-<version>.tgz`, the exact file `npm publish` uploads. Publish that file yourself (`npm publish ../shared-packages/<file>.tgz --registry "$NPM_REGISTRY_URL"`), or deploy the `.tgz` into the npm repository through the Artifactory web UI (the repository's **Deploy** action - Artifactory takes the package name and version from the tarball; check with your platform team how your repository is set up), or hand it to whoever manages the repository.
+
+**Order matters.** Publish what a package depends on first: `utils` -> `api` and `ui` -> `sap` -> the consuming repos.
+
+## Using a package without a registry (local generation)
+
+Use this when the packages are not in a registry yet, or you want to try a change before publishing it. Nothing in `package.json` or the lockfile changes.
+
+**Automatic - when the repos are checked out next to each other:**
 
 ```bash
-./scripts/create-package.sh            # writes ../shared-packages/referenced-automation-utils-<version>.tgz
-./scripts/create-package.bat           # same, for Windows
+./scripts/create-package.sh          # Windows: scripts\create-package.bat
 ```
 
-A consuming repo then adds it exactly like any npm dependency:
+It builds this package (clean, build, `npm pack`) and writes `../shared-packages/automation-referenced-automation-utils-<version>.tgz`.
 
-```jsonc
-// package.json
-"dependencies": {
-  "@automation/referenced-automation-utils": "file:../shared-packages/referenced-automation-utils-1.0.0.tgz"
-}
-```
+**Manual - generating a tarball and placing it yourself** (for example when the consuming repo is on another machine):
 
-Once Nexus (or another private registry) is available, the same tarball is what gets `npm publish`ed there - switch consumers to a normal registry version range (`"^1.0.0"`) and point `.npmrc` at the registry; nothing about the package itself changes.
+1. Generate the tarball:
+   ```bash
+   ./scripts/create-package.sh --local
+   ```
+   The file is named `automation-referenced-automation-utils-<version>.tgz` after the version in `package.json` and lands in `../shared-packages`.
+2. Leave the files in `../shared-packages`, or copy them into the consuming repo (any folder works, for example `libs/` - keep it out of git).
+3. Install them, all in one command (change the folder if you copied the files elsewhere):
+   ```bash
+   npm install --no-save ../shared-packages/automation-referenced-automation-utils-<version>.tgz
+   ```
+   `--no-save` keeps `package.json` and the lockfile unchanged. Run it again after every `npm ci`, because `npm ci` removes what is not in the lockfile. When you rebuild a tarball with the same version, run the command again to pick up the new contents.
+4. Build and test as usual (`npm run build`, `npm test`).
+
+When you are done experimenting, run `npm ci` to go back to what the registry provides.
 
 ## IDE setup
 
@@ -272,7 +308,7 @@ referenced-automation-utils/
 │   ├── email/emailUtils.ts
 │   └── index.ts             # barrel export - this is what `import ... from '@automation/referenced-automation-utils'` resolves to
 ├── tests/                  # this package's own unit tests, NOT shipped
-├── scripts/{setup,create-package}.{sh,bat}
+├── scripts/{setup,create-package,publish-package}.{sh,bat}
 ├── .env.example, .env.qa, .env.stage, .env.dev
 ├── .vscode/, .idea/
 └── playwright.config.ts     # this repo's own test runner config

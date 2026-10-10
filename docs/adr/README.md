@@ -7,7 +7,7 @@ One short file per decision that shapes the whole framework family: what was dec
 | # | Decision |
 |---|---|
 | [0001](0001-playwright-as-the-single-runner.md) | Playwright Test is the single runner for web, API and desktop systems |
-| [0002](0002-shared-code-as-versioned-packages.md) | Shared code is distributed as versioned packages |
+| [0002](0002-shared-code-as-versioned-packages.md) | Shared code is distributed as versioned packages (superseded by 0010) |
 | [0003](0003-adapter-contract.md) | Every external system is an Adapter that logs, times and fails the same way |
 | [0004](0004-correlation-id.md) | One correlation id travels through every hop of a test |
 | [0005](0005-no-hard-waits.md) | No hard waits: waiting is built in and lint-enforced |
@@ -15,3 +15,4 @@ One short file per decision that shapes the whole framework family: what was dec
 | [0007](0007-secrets.md) | Secrets are never in code and never stored beside their key |
 | [0008](0008-sap-gui-transport.md) | SAP GUI: a transport seam, PowerShell by default, a Java/JACOB fallback |
 | [0009](0009-security-gates.md) | Security gates in CI: dependency audit with expiring exceptions, and secret scanning |
+| [0010](0010-packages-installed-by-version-from-the-registry.md) | Shared packages are installed by version from the npm registry; local tarballs are the fallback |
