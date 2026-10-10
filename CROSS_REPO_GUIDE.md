@@ -230,6 +230,42 @@ the registry versions.
 
 `ui-api` has no `create-package.sh` of its own - nothing depends on it.
 
+### 4.3 First rollout: publish everything, then install from the registry
+
+A walkthrough to prove the whole chain works from the registry, with no local tarballs. Run each step in the repo named.
+
+1. **Set the registry** (every terminal; the URL is your Artifactory npm registry, the `NPM_REGISTRY_URL` CI/CD variable):
+   ```bash
+   export NPM_REGISTRY_URL="<your registry URL>"
+   ```
+   Authenticate npm against it with your organisation's own procedure (not covered here; the scripts never log in).
+2. **Publish in dependency order.** The first publish of each package uses its current version (1.0.0) as it is - bump the version only for later releases. In `referenced-automation-utils`:
+   ```bash
+   ./scripts/publish-package.sh --dry-run     # check what would be uploaded
+   ./scripts/publish-package.sh
+   ```
+   Then the same two commands in `referenced-automation-api` and `referenced-automation-ui`, then `referenced-automation-sap`. The order matters because each publish builds the package with `npm ci`, which needs the packages it depends on to be in the registry already.
+3. **Confirm they arrived:**
+   ```bash
+   for p in utils api ui sap; do npm view @automation/referenced-automation-$p versions --registry "$NPM_REGISTRY_URL"; done
+   ```
+4. **Install a consumer from the registry - no `--local`.** In `referenced-automation-ui-api` (it uses all four packages):
+   ```bash
+   rm -rf node_modules
+   ./scripts/setup.sh                          # Windows: scripts\setup.bat
+   ```
+   The output starts with the registry line and then `== Installing dependencies from the registry ==`; `npm ci` downloads `@automation/referenced-automation-utils`, `-api`, `-ui` and `-sap` by the versions in `package.json`.
+5. **Check where they came from:**
+   ```bash
+   npm config get registry                                  # your registry URL
+   npm ls @automation/referenced-automation-utils           # the published version
+   grep -A2 '"node_modules/@automation/referenced-automation-utils"' package-lock.json    # resolved: a URL under your registry
+   ```
+   The committed lockfiles do not yet hold a `resolved` address for these packages; once npm has installed them from the registry the lockfile gains it (run `npm install` once if it did not). Commit `package-lock.json` in each consumer.
+6. `npm test` in the consumer to finish.
+
+If step 4 stops with "No matching version found for @automation/...", that version is not in the registry `npm config get registry` shows: check step 3 and the URL.
+
 ## 5. Day to day: change a shared package, upgrade a consumer
 
 You change something in a shared repo (say `utils`) and want its consumers to
