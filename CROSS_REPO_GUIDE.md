@@ -399,6 +399,7 @@ import {
 ```
 
 The API package also ships `api-curl-to-playwright` (curl commands -> tests; `npx api-curl-to-playwright curl/ --out tests/generated`).
+Every converter (`api-curl-to-playwright`, `ui-codegen-to-playwright`, `sap-vbs-to-playwright`) writes tests that start with the same two kinds of object, which the steps only refer to: `CONSTANTS` (everything typed, sent or expected; secrets as getters that read the environment) and the locators (`LOCATORS` for UI and SAP, `ENDPOINTS` for API). Change an input or fix a locator once, at the top; `--inline` opts out.
 Retries, polling, idempotency keys, downloads, GraphQL/SOAP and the exchange log are on `ApiClient`; see its `docs/PLAYWRIGHT_COVERAGE.md`.
 
 ### `@automation/referenced-automation-ui`
