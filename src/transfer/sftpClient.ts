@@ -1,5 +1,7 @@
+import * as crypto from 'node:crypto';
 import Client from 'ssh2-sftp-client';
 import { adapterStep, type Adapter } from '../adapters/adapter';
+import { getLogger } from '../logger/logger';
 
 export interface SftpConfig {
   host: string;
@@ -9,6 +11,28 @@ export interface SftpConfig {
   privateKey?: string | Buffer;
   passphrase?: string;
   readyTimeout?: number;
+  /**
+   * The server's host key fingerprint, as OpenSSH prints it (`SHA256:<base64>`, from `ssh-keygen -lf` or
+   * `ssh-keyscan host | ssh-keygen -lf -`) or as 64 hex characters. When set, a connection to a server presenting any
+   * other key is refused BEFORE credentials are sent - without it a man in the middle receives the password.
+   */
+  hostFingerprint?: string;
+  /** Your own check of the raw host key (return true to accept). Applied in addition to `hostFingerprint`. */
+  hostVerifier?: (hostKey: Buffer) => boolean;
+}
+
+/** `SHA256:<base64, unpadded>` of an SSH host key blob - the form `ssh-keygen -l` prints. */
+export function hostKeyFingerprint(hostKey: Buffer): string {
+  return `SHA256:${crypto.createHash('sha256').update(hostKey).digest('base64').replace(/=+$/, '')}`;
+}
+
+function sameFingerprint(expected: string, hostKey: Buffer): boolean {
+  const wanted = expected.trim();
+  const sha256 = crypto.createHash('sha256').update(hostKey).digest();
+  const given = /^sha256:/i.test(wanted)
+    ? Buffer.from(wanted.slice(7).replace(/=+$/, ''), 'base64')
+    : Buffer.from(wanted.replace(/:/g, ''), 'hex'); // hex, with or without colons
+  return given.length === sha256.length && crypto.timingSafeEqual(given, sha256);
 }
 
 export interface SftpFileInfo {
@@ -46,19 +70,58 @@ export class SftpClient implements Adapter {
   private readonly client = new Client();
   private connected = false;
 
+  constructor() {
+    // The connection can die under us (server restart, network drop): track it, so healthCheck() tells the truth.
+    const dropped = () => {
+      this.connected = false;
+    };
+    this.client.on('close', dropped);
+    this.client.on('end', dropped);
+    this.client.on('error', dropped);
+  }
+
   async connect(config: SftpConfig): Promise<void> {
+    // A second connect() on the same client would orphan the first connection (and its socket): end that one first.
+    if (this.connected) await this.close();
+    const { hostFingerprint, hostVerifier, ...ssh } = config;
+    const sshConfig: Record<string, unknown> = { ...ssh };
+    if (hostFingerprint !== undefined || hostVerifier) {
+      sshConfig.hostVerifier = (hostKey: Buffer) =>
+        (hostFingerprint === undefined || sameFingerprint(hostFingerprint, hostKey)) &&
+        (!hostVerifier || hostVerifier(hostKey));
+    } else {
+      getLogger(this.name).warn(
+        `connecting to ${config.host} without host key verification - set hostFingerprint to refuse an impostor server`,
+      );
+    }
     // Host/port/user only - never the password/privateKey.
-    await adapterStep(this.name, 'connect', () => this.client.connect(config), {
+    await adapterStep(this.name, 'connect', () => this.client.connect(sshConfig as never), {
       details: { host: config.host, port: config.port ?? 22, username: config.username },
     });
     this.connected = true;
   }
 
-  /** True once connect() has succeeded and until close() - a cheap, side-effect-free check. */
+  /**
+   * True while the connection is alive: false before connect(), after close(), and once the server or network has
+   * dropped it (the client's 'close' / 'end' / 'error' events), confirmed by a round trip to the server.
+   */
   async healthCheck(): Promise<boolean> {
-    return this.connected;
+    if (!this.connected) return false;
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      await Promise.race([
+        this.client.cwd(),
+        new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error('no answer from the SFTP server')), 5000);
+        }),
+      ]);
+      return true;
+    } catch {
+      return false;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   }
-
   /** Uploads a local file to a remote path. */
   async upload(localPath: string, remotePath: string): Promise<void> {
     await adapterStep(this.name, 'upload', () => this.client.put(localPath, remotePath), {
@@ -101,13 +164,14 @@ export class SftpClient implements Adapter {
     await adapterStep(this.name, 'mkdir', () => this.client.mkdir(remoteDir, recursive), { details: { remoteDir, recursive } });
   }
 
-  async rmdir(remoteDir: string, recursive = true): Promise<void> {
+  /** Removes a directory. Empty ones only by default; pass `recursive: true` to delete its contents too (explicitly - it cannot be undone). */
+  async rmdir(remoteDir: string, recursive = false): Promise<void> {
     await adapterStep(this.name, 'rmdir', () => this.client.rmdir(remoteDir, recursive), { details: { remoteDir, recursive } });
   }
 
   async close(): Promise<void> {
     if (!this.connected) return;
-    await adapterStep(this.name, 'close', () => this.client.end());
     this.connected = false;
+    await adapterStep(this.name, 'close', () => this.client.end());
   }
 }

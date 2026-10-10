@@ -1,4 +1,5 @@
-import { loadEnv } from '../config/env';
+import { loadEnv, type ConfigReader } from '../config/env';
+import type { Dayjs } from 'dayjs';
 import * as dateUtils from '../date/dateUtils';
 import * as randomUtils from '../random/randomUtils';
 
@@ -56,6 +57,26 @@ export function randomValue(spec: string): string {
   }
 }
 
+/**
+ * Variables the CI system provides to every job that are credentials. `{{env:X}}` refuses them: a feature file or test
+ * that embeds one would print it into the HTML report, traces and logs, and nothing in a test needs the job's own token.
+ */
+const FORBIDDEN_ENV = [
+  /^CI_JOB_TOKEN$/,
+  /^CI_BUILD_TOKEN$/,
+  /^CI_JOB_JWT/,
+  /^CI_REGISTRY_PASSWORD$/,
+  /^CI_DEPLOY_PASSWORD$/,
+  /^CI_DEPENDENCY_PROXY_PASSWORD$/,
+  /^CI_RUNNER_.*TOKEN/,
+  /^CI_REPOSITORY_URL$/, // embeds gitlab-ci-token:<job token>@
+];
+
+/** True for a CI-provided credential variable (CI_JOB_TOKEN, CI_REGISTRY_PASSWORD, CI_JOB_JWT_V2, ...). */
+export function isForbiddenEnvName(name: string): boolean {
+  return FORBIDDEN_ENV.some((pattern) => pattern.test(name.trim()));
+}
+
 const OFFSET = /^([+-]?\d+)\s*(ms|s|m|h|d|w|M|y)$/;
 const UNITS: Record<
   string,
@@ -71,13 +92,17 @@ const UNITS: Record<
   y: 'year',
 };
 
-/** now, or now +/- an offset such as `+7d`, `-1M`, `+90m`, formatted with a dayjs pattern (default YYYY-MM-DD). */
+/**
+ * now, or now +/- an offset such as `+7d`, `-1M`, `+90m`, formatted with a dayjs pattern (default YYYY-MM-DD).
+ * `from` replaces "now" as the starting point (a fixed date makes the result reproducible).
+ */
 export function relativeDate(
   offset: string,
   pattern: string = dateUtils.DEFAULT_DATE_PATTERN,
+  from?: Dayjs,
 ): string {
   const trimmed = offset.trim();
-  let moment = dateUtils.now();
+  let moment = from ?? dateUtils.now();
   if (trimmed !== '' && trimmed !== 'now' && trimmed !== 'today') {
     const match = OFFSET.exec(trimmed);
     if (!match)
@@ -103,6 +128,12 @@ export function relativeDate(
  */
 export class ScenarioVariables {
   private readonly values = new Map<string, string>();
+  private env: ConfigReader | undefined;
+
+  /** @param env where `{{env:NAME}}` reads from after the real environment; default: the .env.<ENV> files, loaded once per instance. */
+  constructor(env?: ConfigReader) {
+    this.env = env;
+  }
 
   set(name: string, value: unknown): this {
     this.values.set(name, typeof value === 'string' ? value : JSON.stringify(value));
@@ -158,10 +189,15 @@ export class ScenarioVariables {
     if (expression.startsWith('env:')) {
       const [key, ...rest] = expression.slice(4).split('|');
       const fallback = rest.length > 0 ? rest.join('|') : undefined;
-      const value = loadEnv().getOptional((key as string).trim()) ?? fallback;
+      const name = (key as string).trim();
+      if (isForbiddenEnvName(name))
+        throw new Error(
+          `{{${expression}}}: ${name} is a credential the CI system injects (the job token, a registry password, ...) and is never available to test data. Use a variable you define for the test instead.`,
+        );
+      const value = process.env[name] ?? (this.env ??= loadEnv()).getOptional(name) ?? fallback;
       if (value === undefined)
         throw new Error(
-          `{{${expression}}}: environment variable ${String(key).trim()} is not set (add "|fallback" to allow it to be absent).`,
+          `{{${expression}}}: environment variable ${name} is not set (add "|fallback" to allow it to be absent).`,
         );
       return value;
     }

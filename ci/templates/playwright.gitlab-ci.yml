@@ -10,56 +10,73 @@
 #
 #   stages: [build, test, report]
 #
+#   typecheck:
+#     extends: .automation-typecheck        # tsc over src AND tests (Playwright does not type-check the tests it runs)
 #   test:
 #     extends: .automation-test-sharded     # runs the suite in N parallel shards
 #     needs: ["build"]
+#     parallel: 4                           # optional: the shard count (default 3) - the ONE place it is written
 #   merge-reports:
-#     extends: .automation-merge-reports    # one HTML report + run summary from all shards
+#     extends: .automation-merge-reports    # one HTML report + run summary + flaky / nothing-ran gates from all shards
 #     needs: ["test"]
 #   security:
-#     extends: .automation-security
+#     extends: .automation-security         # secret scan + dependency audit; a finding blocks, "could not run" does not
 #     needs: ["build"]
 #
 # Nothing here knows about registries or credentials: NPM_REGISTRY_URL (and, if your Artifactory mirrors the browser
-# CDN, PLAYWRIGHT_DOWNLOAD_HOST) are CI/CD variables. A repo that needs its sibling packages built first (utils, ui...)
-# does that in its own `before_script`/`script`, as the existing .gitlab-ci.yml files do.
+# CDN, PLAYWRIGHT_DOWNLOAD_HOST) are CI/CD variables. The sibling packages (utils, ui...) are installed from that
+# registry by version with `npm ci`, like any other dependency - nothing here builds them.
 #
 # NOT VERIFIED on a real GitLab: written from GitLab's and Playwright's documented behaviour and checked for YAML
 # structure only (see tests/ciTemplate.spec.ts). Run one pipeline and fix what it says before relying on it.
 # ============================================================================
 
 variables:
-  # How many parallel shards `.automation-test-sharded` splits the suite into. Override per project.
-  AUTOMATION_SHARDS: "3"
   npm_config_cache: "${CI_PROJECT_DIR}/.npm-cache"
+  # Gates in `.automation-merge-reports` (see `automation-run-report --help`). Override per project.
+  AUTOMATION_MIN_EXECUTED: "1"       # fail when fewer tests than this actually ran (an all-skipped run is not a pass)
+  AUTOMATION_FAIL_ON_FLAKY: "3"      # fail when this many tests needed a retry to pass (1 = any; 0 = off)
 
 .automation-registry:
   before_script:
     - if [ -n "${NPM_REGISTRY_URL:-}" ]; then npm config set registry "$NPM_REGISTRY_URL"; fi
     - if [ -n "${PLAYWRIGHT_DOWNLOAD_HOST:-}" ]; then export PLAYWRIGHT_DOWNLOAD_HOST; fi
 
-# Dependency audit + secret scan. allow_failure until it has run green on your GitLab, then flip it.
+# Type-check src and tests: `playwright test` strips types without checking them, so a type error in a test is only
+# found here.
+.automation-typecheck:
+  extends: .automation-registry
+  stage: test
+  script:
+    - npm ci
+    - npm run typecheck
+
+# Secret scan + dependency audit. A finding BLOCKS (exit 1). Only exit code 2 - the audit could not run (registry
+# unreachable, npm missing) - is allowed to fail, so a flaky network does not stop the pipeline but a vulnerability
+# or a leaked secret does. The audit also exits 1 for an allowlist that breaks the rules (no owner, no package, an
+# expiry more than a year away) and for a report it does not understand: it fails closed.
 .automation-security:
   extends: .automation-registry
   stage: test
-  allow_failure: true
+  allow_failure:
+    exit_codes: 2
   script:
     - npm ci
     - npx automation-scan-secrets
     - npx automation-audit-gate
 
-# The suite split into shards that run in parallel. Each shard writes a blob report; `.automation-merge-reports`
-# turns them into one report. A shard that fails fails the pipeline; retries are the Playwright config's job (RETRIES).
+# The suite split into shards that run in parallel. `parallel: N` is the only place the shard count is written: GitLab
+# starts N copies of the job and numbers them with CI_NODE_INDEX / CI_NODE_TOTAL, which is what picks each shard.
+# Each shard writes a blob report; `.automation-merge-reports` turns them into one report. A shard that fails fails
+# the pipeline; retries are the Playwright config's job (RETRIES).
 .automation-test-sharded:
   extends: .automation-registry
   stage: test
-  parallel:
-    matrix:
-      - SHARD: ["1/3", "2/3", "3/3"]   # keep in step with AUTOMATION_SHARDS
+  parallel: 3
   script:
     - npm ci
     - npx playwright install chromium
-    - npx playwright test --shard="$SHARD" --reporter=blob
+    - npx playwright test --shard="${CI_NODE_INDEX}/${CI_NODE_TOTAL}" --reporter=blob
   artifacts:
     when: always
     paths:
@@ -68,7 +85,9 @@ variables:
     expire_in: 7 days
 
 # One HTML report, one JUnit file (for GitLab's test tab) and the run summary (failures, flaky tests, slowest tests,
-# repeat offenders across runs) from all the shards' blob reports.
+# repeat offenders across runs) from all the shards' blob reports - then the gates: fail if too few tests ran (or the
+# run itself reported errors) or too many were flaky. Flake history is kept per default branch and only that branch's
+# pipelines add to it, so a merge request neither pollutes nor reads another one's history.
 .automation-merge-reports:
   extends: .automation-registry
   stage: report
@@ -78,9 +97,11 @@ variables:
     - PLAYWRIGHT_JSON_OUTPUT_NAME=test-results/results.json npx playwright merge-reports --reporter=json ./blob-report
     - PLAYWRIGHT_JUNIT_OUTPUT_NAME=test-results/junit.xml npx playwright merge-reports --reporter=junit ./blob-report
     - npx playwright merge-reports --reporter=html ./blob-report
-    - npx automation-run-report --input test-results/results.json --out test-results/run-report.md --history .ci-history/history.jsonl --append
+    - APPEND=""; if [ "$CI_COMMIT_BRANCH" = "$CI_DEFAULT_BRANCH" ]; then APPEND="--append"; fi
+    - GATES="--min-executed ${AUTOMATION_MIN_EXECUTED:-1}"; if [ "${AUTOMATION_FAIL_ON_FLAKY:-0}" != "0" ]; then GATES="$GATES --fail-on-flaky $AUTOMATION_FAIL_ON_FLAKY"; fi
+    - npx automation-run-report --input test-results/results.json --out test-results/run-report.md --history .ci-history/history.jsonl $APPEND $GATES
   cache:
-    key: automation-history
+    key: "automation-history-${CI_DEFAULT_BRANCH}"
     paths:
       - .ci-history/
   artifacts:
@@ -91,3 +112,16 @@ variables:
     reports:
       junit: test-results/junit.xml
     expire_in: 30 days
+
+# The fortnightly framework audit, started by hand: extend it in a job with `when: manual` (see docs/governance/AUDIT.md).
+.automation-audit:
+  when: manual
+  allow_failure: true
+  script:
+    - npm ci
+    - npx automation-framework-audit --out audit-reports ${AUDIT_RUN_GATES:+--run}
+  artifacts:
+    when: always
+    paths:
+      - audit-reports/
+    expire_in: 90 days

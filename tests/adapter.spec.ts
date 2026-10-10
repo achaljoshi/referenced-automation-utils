@@ -48,6 +48,46 @@ test.describe('correlation id', () => {
     ).rejects.toThrow('boom');
     expect(getCorrelationId()).toBe('outer');
   });
+
+  test('overlapping withCorrelationId calls each keep their own id and do not corrupt the restore', async () => {
+    const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+    setCorrelationId('outer');
+    const seen: Record<string, Array<string | undefined>> = { a: [], b: [] };
+    // a finishes first while b is still running: with one shared variable, a's restore would clobber b's id
+    const a = withCorrelationId('A', async () => {
+      seen.a!.push(getCorrelationId());
+      await sleep(10);
+      seen.a!.push(getCorrelationId());
+    });
+    await sleep(2);
+    const b = withCorrelationId('B', async () => {
+      seen.b!.push(getCorrelationId());
+      await sleep(40);
+      seen.b!.push(getCorrelationId());
+    });
+    await Promise.all([a, b]);
+    expect(seen).toEqual({ a: ['A', 'A'], b: ['B', 'B'] });
+    expect(getCorrelationId()).toBe('outer');
+  });
+
+  test('nested scopes restore the enclosing one, and setCorrelationId inside a scope stays inside it', async () => {
+    await withCorrelationId('outer', async () => {
+      await withCorrelationId('inner', async () => {
+        setCorrelationId('changed');
+        expect(getCorrelationId()).toBe('changed');
+      });
+      expect(getCorrelationId()).toBe('outer');
+    });
+    expect(getCorrelationId()).toBeUndefined();
+  });
+
+  test('the id follows async work started inside the scope (timers, awaited promises)', async () => {
+    const seen = await withCorrelationId('flow', async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      return Promise.resolve().then(() => getCorrelationId());
+    });
+    expect(seen).toBe('flow');
+  });
 });
 
 import { useTestCorrelation } from '../src/logger/correlation';
@@ -63,5 +103,15 @@ test.describe('useTestCorrelation', () => {
     expect(seenDuring).toMatch(/^[0-9a-f-]{36}$/);
     expect(annotations).toEqual([{ type: 'correlationId', description: seenDuring }]);
     expect(getCorrelationId()).toBeUndefined();
+  });
+
+  test('restores whatever was active before, instead of clearing it', async () => {
+    setCorrelationId('before');
+    try {
+      await useTestCorrelation({ annotations: [] }, async () => undefined);
+      expect(getCorrelationId()).toBe('before');
+    } finally {
+      setCorrelationId(undefined);
+    }
   });
 });

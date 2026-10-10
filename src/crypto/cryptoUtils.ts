@@ -38,7 +38,9 @@ export function base64Decode(base64Input: string): string {
  * masked form instead.
  */
 export function mask(value: string, visibleChars = 4): string {
-  if (value.length <= visibleChars) return '*'.repeat(value.length);
-  const visible = value.slice(-visibleChars);
-  return '*'.repeat(value.length - visibleChars) + visible;
+  const shown = Math.max(0, Math.floor(visibleChars));
+  if (value.length <= shown) return '*'.repeat(value.length);
+  // slice(-0) would return the whole value, so mask(secret, 0) must not go through it
+  const visible = shown > 0 ? value.slice(-shown) : '';
+  return '*'.repeat(value.length - shown) + visible;
 }

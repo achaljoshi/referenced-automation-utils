@@ -53,13 +53,33 @@ export async function writeSheet(
   await workbook.xlsx.writeFile(filePath);
 }
 
+/** ExcelJS gives rich text as runs ({ richText: [{ text }, ...] }); the cell's plain text is the runs joined. */
+function richTextToString(runs: Array<{ text?: unknown }>): string {
+  return runs.map((run) => String(run.text ?? '')).join('');
+}
+
 function normalizeCellValue(value: ExcelJS.CellValue): string | number | boolean | Date | null {
   if (value === null || value === undefined) return null;
-  if (typeof value === 'object' && 'text' in value) return String(value.text);
-  if (typeof value === 'object' && 'result' in value) return value.result as string | number;
   if (value instanceof Date) return value;
   if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
     return value;
+  }
+  if (typeof value === 'object') {
+    const cell = value as unknown as Record<string, unknown>;
+    // rich text: formatted runs in one cell (bold word, coloured word, ...)
+    if (Array.isArray(cell.richText)) return richTextToString(cell.richText);
+    // hyperlink / text object; the text itself can be rich text
+    if ('text' in cell) {
+      const text = cell.text as unknown;
+      if (text && typeof text === 'object' && Array.isArray((text as { richText?: unknown }).richText))
+        return richTextToString((text as { richText: Array<{ text?: unknown }> }).richText);
+      return String(text ?? '');
+    }
+    // formula: the cached result (which may itself be a date, text or error); null if it was never calculated
+    if ('formula' in cell || 'sharedFormula' in cell || 'result' in cell) {
+      return cell.result === undefined ? null : normalizeCellValue(cell.result as ExcelJS.CellValue);
+    }
+    if ('error' in cell) return String(cell.error);
   }
   return String(value);
 }

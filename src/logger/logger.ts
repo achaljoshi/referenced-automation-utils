@@ -18,20 +18,70 @@ import { getCorrelationId } from './correlation';
  *   locked-down runner) the logger keeps working on console alone rather
  *   than crashing the test run.
  * - Values under keys that look sensitive (password, token, authorization,
- *   secret, api key, cookie, credential) are redacted before anything is
- *   written, so a stray `logger.info('x', { headers })` can't leak them.
+ *   secret, api key, cookie, credential, jwt, session, bearer, private) are
+ *   redacted before anything is written, so a stray
+ *   `logger.info('x', { headers })` can't leak them. Keys are matched as
+ *   words (`passed`, `bypass`, `passport` are fine), at any depth. Free text
+ *   is scrubbed too: `Bearer <token>`, JWTs, `scheme://user:pass@host` and
+ *   `password=...` in a message or error text.
  *
  * Env knobs: LOG_LEVEL (default info), LOG_TO_FILE=false, LOG_FILE=<path>,
- * NO_COLOR=1, FORCE_COLOR=1.
+ * LOG_FILE_PER_WORKER=true (one file per Playwright worker, rotated, e.g.
+ * automation-w2.log), NO_COLOR=1, FORCE_COLOR=1.
  */
+/** logs/automation.log -> logs/automation-w2.log for worker 2, so parallel workers do not interleave lines in one shared file. */
+export function logFilePath(file: string, perWorker: boolean, worker: string | undefined): string {
+  if (!perWorker || worker === undefined) return file;
+  const ext = path.extname(file);
+  return `${file.slice(0, file.length - ext.length)}-w${worker}${ext}`;
+}
+
 const level = process.env.LOG_LEVEL ?? 'info';
 const logToFile = (process.env.LOG_TO_FILE ?? 'true').toLowerCase() !== 'false';
-const logFile = process.env.LOG_FILE ?? 'logs/automation.log';
+const perWorkerFile = (process.env.LOG_FILE_PER_WORKER ?? 'false').toLowerCase() === 'true';
+const logFile = logFilePath(process.env.LOG_FILE ?? 'logs/automation.log', perWorkerFile, process.env.TEST_WORKER_INDEX);
 const useColor =
   (process.stdout.isTTY === true && !process.env.CI && !process.env.NO_COLOR) || Boolean(process.env.FORCE_COLOR);
 
-const SENSITIVE_KEY = /pass(word|wd)?|secret|token|authorization|api[-_]?key|cookie|credential/i;
 const REDACTED = '[REDACTED]';
+
+// Words (after splitting camelCase, snake_case, kebab-case and dotted keys) that mark a value as sensitive.
+const SENSITIVE_WORDS = new Set([
+  'pass',
+  'password',
+  'passwd',
+  'pwd',
+  'passphrase',
+  'passcode',
+  'secret',
+  'secrets',
+  'token',
+  'tokens',
+  'authorization',
+  'cookie',
+  'cookies',
+  'credential',
+  'credentials',
+  'jwt',
+  'session',
+  'bearer',
+  'private',
+  'apikey',
+]);
+// compound forms that are only sensitive together ("key" alone is not: it is a lookup key, a primary key, ...)
+const SENSITIVE_COMPACT = /apikey|accesskey|secretkey|privatekey|signingkey|sessionid|xapikey/;
+
+/** True for a key that names a secret: matched as whole words, so `password`, `apiKey`, `x-api-key`, `Set-Cookie` yes; `passed`, `bypass`, `passport` no. */
+export function isSensitiveKey(key: string): boolean {
+  const words = key
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+  if (words.some((word) => SENSITIVE_WORDS.has(word))) return true;
+  return SENSITIVE_COMPACT.test(words.join(''));
+}
 
 // Playwright (and other tools) embed ANSI colour codes in error text. In a
 // CI job log or a log file they show up as literal escape junk, so strip them
@@ -42,15 +92,59 @@ export function stripAnsi(value: string): string {
   return value.replace(ANSI, '');
 }
 
-export function redact(value: unknown, depth = 0): unknown {
-  if (typeof value === 'string') return stripAnsi(value);
-  if (value === null || typeof value !== 'object' || depth > 6) return value;
-  if (Array.isArray(value)) return value.map((item) => redact(item, depth + 1));
-  const out: Record<string, unknown> = {};
-  for (const [key, inner] of Object.entries(value as Record<string, unknown>)) {
-    out[key] = SENSITIVE_KEY.test(key) ? REDACTED : redact(inner, depth + 1);
-  }
+const SENSITIVE_NAME = '[\\w.-]*(?:password|passwd|pwd|passphrase|secret|token|api[_-]?key|credential|cookie)[\\w.-]*';
+const TEXT_PATTERNS: Array<[RegExp, string]> = [
+  // Authorization: Bearer abc / Authorization: Basic abc / "authorization":"abc"
+  [/(\bauthorization["']?\s*[:=]\s*["']?)(?:(?:bearer|basic|token|digest)\s+)?[^\s"',;]+/gi, `$1${REDACTED}`],
+  // a bare "Bearer <token>" (curl -H 'Authorization: Bearer ...' is covered above; this catches prose and error text)
+  [/\b(bearer\s+)[A-Za-z0-9._~+/=-]{8,}/gi, `$1${REDACTED}`],
+  // a JSON Web Token
+  [/\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]*/g, REDACTED],
+  // scheme://user:password@host
+  [/\b([a-z][a-z0-9+.-]*:\/\/[^/\s:@]+:)[^/\s@]+@/gi, `$1${REDACTED}@`],
+  // "password": "x" / 'token': 'x' inside JSON-ish text
+  [new RegExp(`(["']${SENSITIVE_NAME}["']\\s*:\\s*)(?:"(?:[^"\\\\]|\\\\.)*"|'[^']*')`, 'gi'), `$1"${REDACTED}"`],
+  // password=x, access_token=x, API_KEY="x" (query strings, env-style lines)
+  [new RegExp(`(\\b${SENSITIVE_NAME}\\s*=\\s*)(?:"[^"]*"|'[^']*'|[^\\s&,;)"']+)`, 'gi'), `$1${REDACTED}`],
+];
+
+/** Removes credentials from free text: Bearer tokens, Authorization headers, JWTs, URL passwords, `password=...`, `"token": "..."`. */
+export function scrubText(text: string): string {
+  let out = text;
+  for (const [pattern, replacement] of TEXT_PATTERNS) out = out.replace(pattern, replacement);
   return out;
+}
+
+function walk(value: unknown, seen: WeakSet<object>): unknown {
+  if (typeof value === 'string') return scrubText(stripAnsi(value));
+  if (value === null || typeof value !== 'object') return value;
+  if (value instanceof Date) return value;
+  if (seen.has(value)) return '[Circular]';
+  seen.add(value);
+  try {
+    if (Array.isArray(value)) return value.map((item) => walk(item, seen));
+    if (value instanceof Error) {
+      // Error fields are not enumerable, so the generic path below would log it as {}
+      return {
+        name: value.name,
+        message: walk(value.message, seen),
+        ...(value.stack ? { stack: walk(value.stack, seen) } : {}),
+      };
+    }
+    const out: Record<string, unknown> = {};
+    for (const [key, inner] of Object.entries(value as Record<string, unknown>)) {
+      out[key] = isSensitiveKey(key) ? REDACTED : walk(inner, seen);
+    }
+    return out;
+  } finally {
+    // only a value that contains itself is "circular"; the same object appearing twice side by side is not
+    seen.delete(value);
+  }
+}
+
+/** A copy of `value` that is safe to write: sensitive keys redacted at any depth (cycles are cut, not recursed into), credentials scrubbed from strings, ANSI stripped. */
+export function redact(value: unknown): unknown {
+  return walk(value, new WeakSet());
 }
 
 function context(): string {
@@ -65,11 +159,11 @@ function context(): string {
 const redactFormat = winston.format((info) => {
   for (const key of Object.keys(info)) {
     if (key === 'message') {
-      if (typeof info.message === 'string') info.message = stripAnsi(info.message);
+      if (typeof info.message === 'string') info.message = scrubText(stripAnsi(info.message));
       continue;
     }
     if (key === 'level' || key === 'timestamp' || key === 'component') continue;
-    (info as Record<string, unknown>)[key] = SENSITIVE_KEY.test(key) ? REDACTED : redact((info as Record<string, unknown>)[key]);
+    (info as Record<string, unknown>)[key] = isSensitiveKey(key) ? REDACTED : redact((info as Record<string, unknown>)[key]);
   }
   return info;
 });
@@ -108,7 +202,9 @@ function fileTransportIfWritable(): winston.transport[] {
   try {
     fs.mkdirSync(path.dirname(logFile), { recursive: true });
     fs.accessSync(path.dirname(logFile), fs.constants.W_OK);
-    return [new winston.transports.File({ filename: logFile, format: fileFormat })];
+    // A file of its own (per worker) can be rotated safely; one file shared by several processes cannot.
+    const rotation = perWorkerFile ? { maxsize: 10 * 1024 * 1024, maxFiles: 3 } : {};
+    return [new winston.transports.File({ filename: logFile, format: fileFormat, ...rotation })];
   } catch (error) {
     process.stdout.write(
       `[logger] file logging disabled - cannot write to "${logFile}": ${

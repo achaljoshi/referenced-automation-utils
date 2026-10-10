@@ -1,0 +1,63 @@
+{
+  "ignore": [
+    {
+      "rule": "wait-networkidle",
+      "path": "tests/frameworkAudit.spec.ts",
+      "reason": "fixture text the audit tests feed to the rules; not a wait in this repo"
+    },
+    {
+      "rule": "wait-networkidle",
+      "path": "tests/lintRules.spec.ts",
+      "reason": "fixture text the lint-rule tests feed to ESLint; not a wait in this repo"
+    },
+    {
+      "rule": "serial-mode",
+      "path": "tests/frameworkAudit.spec.ts",
+      "reason": "fixture text, not a suite setting"
+    },
+    {
+      "rule": "serial-mode",
+      "path": "tests/sftpClient.spec.ts",
+      "reason": "the tests share one in-process SFTP server whose state they change"
+    },
+    {
+      "rule": "sleep-promise",
+      "path": "tests/frameworkAudit.spec.ts",
+      "reason": "fixture text, not a wait"
+    },
+    {
+      "rule": "sleep-promise",
+      "path": "tests/adapter.spec.ts",
+      "reason": "simulates async work to prove overlapping scopes keep separate ids; nothing waits for the application"
+    },
+    {
+      "rule": "sleep-promise",
+      "path": "tests/logger.spec.ts",
+      "reason": "the awaited action simulates async work; not a wait for the application"
+    },
+    {
+      "rule": "sleep-promise",
+      "path": "tests/mainframe.spec.ts",
+      "reason": "the elapsed time is the thing under test (a late reply after a timeout, an unhandled error event)"
+    },
+    {
+      "rule": "sleep-promise",
+      "path": "tests/emailUtils.spec.ts",
+      "reason": "gives an unhandled event time to surface before asserting there was none"
+    },
+    {
+      "rule": "sleep-promise",
+      "path": "tests/sftpClient.spec.ts",
+      "reason": "simulates a slow server operation"
+    },
+    {
+      "rule": "sleep-promise",
+      "path": "tests/bridges/fakeS3270.js",
+      "reason": "a stand-in emulator that answers slowly on purpose"
+    },
+    {
+      "rule": "ci-image-mismatch",
+      "reason": "no test in this repo launches a browser (they test Node code), so the image's older browsers are never used"
+    }
+  ]
+}

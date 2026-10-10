@@ -28,6 +28,22 @@ export interface Allowlist {
   allow: AllowEntry[];
 }
 
+/** The `npm audit --json` output is not the shape this gate understands. The gate must then FAIL (never read it as "no findings"). */
+export class AuditShapeError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AuditShapeError';
+  }
+}
+
+/** The allowlist breaks the rules for exceptions (no owner, no package, too far in the future, ...). */
+export class AllowlistError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AllowlistError';
+  }
+}
+
 export interface GateResult {
   /** At or above the threshold, not covered by a valid exception: fails the gate. */
   blocking: Advisory[];
@@ -44,10 +60,35 @@ function severityOf(value: unknown): Severity {
   return ORDER.includes(value as Severity) ? (value as Severity) : 'low';
 }
 
-/** The advisories in `npm audit --json` output (report version 2), one per advisory and package. */
+/**
+ * The advisories in `npm audit --json` output (report version 2), one per advisory and package. Throws
+ * `AuditShapeError` for anything else: a different report version, a missing or mismatched `metadata.vulnerabilities.total`,
+ * or vulnerable packages with no readable advisory - each would otherwise parse to "zero findings" and let the build pass.
+ */
 export function parseAudit(audit: unknown): Advisory[] {
-  const vulnerabilities = ((audit as { vulnerabilities?: Record<string, { via?: unknown[] }> })
-    .vulnerabilities ?? {}) as Record<string, { via?: unknown[] }>;
+  const report = audit as {
+    auditReportVersion?: unknown;
+    vulnerabilities?: unknown;
+    metadata?: { vulnerabilities?: { total?: unknown } };
+  } | null;
+  if (report === null || typeof report !== 'object')
+    throw new AuditShapeError('the npm audit output is not a JSON object');
+  if (report.auditReportVersion !== 2)
+    throw new AuditShapeError(
+      `unsupported npm audit report version ${JSON.stringify(report.auditReportVersion)} (this gate reads version 2; npm 7 or newer)`,
+    );
+  const entries = report.vulnerabilities;
+  if (entries === null || typeof entries !== 'object' || Array.isArray(entries))
+    throw new AuditShapeError('the npm audit report has no "vulnerabilities" object');
+  const vulnerabilities = entries as Record<string, { via?: unknown[] }>;
+  const total = report.metadata?.vulnerabilities?.total;
+  if (typeof total !== 'number')
+    throw new AuditShapeError('the npm audit report has no "metadata.vulnerabilities.total" to check it against');
+  const listed = Object.keys(vulnerabilities).length;
+  if (total !== listed)
+    throw new AuditShapeError(
+      `the npm audit report says ${total} vulnerable package(s) but lists ${listed} - it is incomplete or malformed`,
+    );
   const seen = new Map<string, Advisory>();
   for (const [pkg, vulnerability] of Object.entries(vulnerabilities)) {
     for (const via of vulnerability.via ?? []) {
@@ -72,6 +113,10 @@ export function parseAudit(audit: unknown): Advisory[] {
       seen.set(`${advisory.id}|${advisory.pkg}`, advisory);
     }
   }
+  if (listed > 0 && seen.size === 0)
+    throw new AuditShapeError(
+      `the npm audit report lists ${listed} vulnerable package(s) but no advisory could be read from it`,
+    );
   return [...seen.values()].sort(
     (a, b) => ORDER.indexOf(b.severity) - ORDER.indexOf(a.severity) || a.pkg.localeCompare(b.pkg),
   );
@@ -130,16 +175,58 @@ export function evaluate(
   return result;
 }
 
-export function loadAllowlist(file: string): Allowlist {
-  if (!fs.existsSync(file)) return { allow: [] };
-  const parsed = JSON.parse(fs.readFileSync(file, 'utf8')) as Allowlist;
-  for (const entry of parsed.allow ?? []) {
-    if (!entry.id || !entry.reason || !entry.expires)
-      throw new Error(
-        `every allowlist entry needs "id", "reason" and "expires" (found ${JSON.stringify(entry)})`,
+const NO_OWNER = /^(?:unassigned|unknown|none|n\/a|na|tbd|todo|nobody|-+)\b/i;
+
+export interface AllowlistRules {
+  /** Accept an entry whose owner is missing or a placeholder (UNASSIGNED, TBD). Default false: an exception nobody owns is nobody's to renew or retire. */
+  allowUnassigned?: boolean;
+  /** The furthest an expiry may be from today. Default 366 days: an accepted risk has to be re-decided at least yearly. */
+  maxExpiryDays?: number;
+  now?: Date;
+}
+
+/** Checks every entry against the rules for exceptions; throws `AllowlistError` naming the first offender. */
+export function validateAllowlist(allowlist: Allowlist, rules: AllowlistRules = {}): void {
+  const now = rules.now ?? new Date();
+  const maxDays = rules.maxExpiryDays ?? 366;
+  for (const entry of allowlist.allow) {
+    const label = entry.id ? `${entry.id}${entry.package ? ` (${entry.package})` : ''}` : JSON.stringify(entry);
+    if (!entry.id || !entry.package || !entry.reason || !entry.expires)
+      throw new AllowlistError(
+        `every allowlist entry needs "id", "package", "reason" and "expires" - an entry without a package would excuse the advisory in every package (found ${JSON.stringify(entry)})`,
+      );
+    const expires = Date.parse(`${entry.expires}T23:59:59Z`);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(entry.expires) || Number.isNaN(expires))
+      throw new AllowlistError(`allowlist entry ${label} has an invalid "expires" (${entry.expires}); use YYYY-MM-DD`);
+    if (!rules.allowUnassigned && (!entry.owner || !entry.owner.trim() || NO_OWNER.test(entry.owner.trim())))
+      throw new AllowlistError(
+        `allowlist entry ${label} has no real owner (${JSON.stringify(entry.owner ?? '')}): name the person or team who will renew or retire it (--allow-unassigned to accept this for now)`,
+      );
+    const days = (expires - now.getTime()) / DAY_MS;
+    if (days > maxDays)
+      throw new AllowlistError(
+        `allowlist entry ${label} expires on ${entry.expires}, ${Math.floor(days)} days away - more than the ${maxDays}-day limit; accepted risks must be re-decided regularly (--max-expiry-days to change the limit)`,
       );
   }
-  return { allow: parsed.allow ?? [] };
+}
+
+/** Entries whose expiry date has passed: they no longer excuse anything and should be fixed, renewed on purpose, or deleted. */
+export function expiredEntries(allowlist: Allowlist, now: Date = new Date()): AllowEntry[] {
+  return allowlist.allow.filter((e) => Date.parse(`${e.expires}T23:59:59Z`) < now.getTime());
+}
+
+export function loadAllowlist(file: string, rules: AllowlistRules = {}): Allowlist {
+  if (!fs.existsSync(file)) return { allow: [] };
+  let parsed: Allowlist;
+  try {
+    parsed = JSON.parse(fs.readFileSync(file, 'utf8')) as Allowlist;
+  } catch (error) {
+    throw new AllowlistError(`${file} is not valid JSON: ${(error as Error).message}`);
+  }
+  const allowlist = { allow: parsed.allow ?? [] };
+  if (!Array.isArray(allowlist.allow)) throw new AllowlistError(`${file}: "allow" must be an array`);
+  validateAllowlist(allowlist, rules);
+  return allowlist;
 }
 
 export function formatGate(result: GateResult, threshold: Severity): string {

@@ -184,6 +184,63 @@ test.describe('S3270Transport over a real process speaking the s3270 line protoc
     await transport.close();
   });
 
+  test('after a timeout the emulator is stopped and the transport is finished: a LATE reply can never answer the next request', async () => {
+    const transport = start({ S3270_SLOW: 'Home:500' }, { requestTimeoutMs: 150 });
+    await transport.request('Connect(h:23)');
+    const timedOut = (await transport.request('Home').catch((e: unknown) => e)) as mainframe.Tn3270Error;
+    expect(timedOut.code).toBe('TIMEOUT');
+    // the old transport kept going: Home's late "ok" (at 500 ms) was delivered as the answer to this Ascii
+    const next = (await transport.request('Ascii').catch((e: unknown) => e)) as mainframe.Tn3270Error;
+    expect(next).toBeInstanceOf(Tn3270Error);
+    expect(next.code).toBe('EXITED');
+    expect(next.message).toMatch(/stopped after a command timed out/);
+    await new Promise((resolve) => setTimeout(resolve, 700)); // past the moment the late reply would have arrived
+    const later = (await transport.request('Ascii').catch((e: unknown) => e)) as mainframe.Tn3270Error;
+    expect(later.code).toBe('EXITED');
+    const pid = (transport as unknown as { child: { pid: number } }).child.pid;
+    await expect.poll(() => { try { process.kill(pid, 0); return 'alive'; } catch { return 'gone'; } }, { timeout: 3000 }).toBe('gone');
+  });
+
+  test('queued commands fail with the reason when an earlier one times out', async () => {
+    const transport = start({ S3270_HANG: 'Home' }, { requestTimeoutMs: 150 });
+    await transport.request('Connect(h:23)');
+    const results = await Promise.all([transport.request('Home'), transport.request('Ascii'), transport.request('Tab')].map((p) => p.catch((e: unknown) => e as mainframe.Tn3270Error)));
+    expect(results.map((r) => (r as mainframe.Tn3270Error).code)).toEqual(['TIMEOUT', 'EXITED', 'EXITED']);
+  });
+
+  test('a per-request timeout overrides the transport default', async () => {
+    const transport = start({ S3270_HANG: 'Home' }, { requestTimeoutMs: 5000 });
+    await transport.request('Connect(h:23)');
+    const started = Date.now();
+    const error = (await transport.request('Home', { timeoutMs: 120 }).catch((e: unknown) => e)) as mainframe.Tn3270Error;
+    expect(error.message).toContain('within 120ms');
+    expect(Date.now() - started).toBeLessThan(2000);
+  });
+
+  test('writing to an emulator that has just died is an error on the request, not an uncaught EPIPE that kills the worker', async () => {
+    const transport = start();
+    await transport.request('Connect(h:23)');
+    const child = (transport as unknown as { child: { kill(signal: string): void } }).child;
+    child.kill('SIGKILL');
+    // straight away, before the exit event has been processed: the write hits a closed pipe
+    const error = (await transport.request('Ascii').catch((e: unknown) => e)) as mainframe.Tn3270Error;
+    expect(error).toBeInstanceOf(Tn3270Error);
+    expect(error.code).toBe('EXITED');
+    await new Promise((resolve) => setTimeout(resolve, 200)); // an unhandled 'error' event would surface as an uncaught exception here
+  });
+
+  test('S3270_PATH names the emulator program when no command is given', async () => {
+    process.env.S3270_PATH = process.execPath;
+    let transport: mainframe.S3270Transport;
+    try {
+      transport = new S3270Transport({ args: [standIn] });
+    } finally {
+      delete process.env.S3270_PATH;
+    }
+    expect((await transport.request('Connect(h:23)')).status.connected).toBe(true);
+    await transport.close();
+  });
+
   test('an emulator that dies fails the pending command with its stderr, and later ones fast', async () => {
     const transport = start({ S3270_CRASH: 'Ascii' });
     await transport.request('Connect(h:23)');
@@ -210,5 +267,72 @@ test.describe('S3270Transport over a real process speaking the s3270 line protoc
     await session.enter();
     await session.waitForText('GRACE HOPPER');
     await session.close();
+  });
+});
+
+test.describe('waiting: one overall deadline, and the transport waits longer than the session', () => {
+  const waitCommands = (host: { commands: string[] }) => host.commands.filter((c) => c.startsWith('Wait('));
+
+  test('waitForText({ timeout }) is bounded by that timeout, not by the session timeout once per poll', async () => {
+    const host = createSampleMainframe({ unlockDelayMs: 1500 });
+    const session = await Tn3270Session.connect(host, { host: 'h' }, { timeoutMs: 30_000, pollMs: 20 });
+    await session.fillAfterLabel('USERID', 'TESTUSER');
+    await session.fillAfterLabel('PASSWORD', 'correct-horse', { secret: true });
+    await host.request('Enter');
+    host.commands.length = 0;
+    const started = Date.now();
+    const error = (await session.waitForText('NEVER ON SCREEN', { timeout: 2000 }).catch((e: unknown) => e)) as Error;
+    expect(error.message).toContain('NEVER ON SCREEN did not appear within 2000ms');
+    expect(Date.now() - started).toBeLessThan(5000);
+    // every wait for the keyboard was bounded by the time left, never the session's 30 s
+    const seconds = waitCommands(host).map((c) => Number(/Wait\((\d+),/.exec(c)?.[1]));
+    expect(seconds.length).toBeGreaterThan(0);
+    expect(Math.max(...seconds)).toBeLessThanOrEqual(2);
+  });
+
+  test('waitForNoText is bounded the same way', async () => {
+    const { session, host } = await connect({ unlockDelayMs: 0 });
+    host.commands.length = 0;
+    const error = (await session.waitForNoText('WELCOME TO THE TEST MAINFRAME', { timeout: 400 }).catch((e: unknown) => e)) as Error;
+    expect(error.message).toContain('was still on the screen after 400ms');
+    expect(Math.max(...waitCommands(host).map((c) => Number(/Wait\((\d+),/.exec(c)?.[1])))).toBeLessThanOrEqual(1);
+  });
+
+  test('a host that stays locked inside waitForText gives the friendly error with the screen, naming the wait', async () => {
+    const host = createSampleMainframe({ unlockDelayMs: 60_000 });
+    const session = await Tn3270Session.connect(host, { host: 'h' }, { timeoutMs: 1000, pollMs: 20 });
+    await session.fillAfterLabel('USERID', 'TESTUSER');
+    await session.fillAfterLabel('PASSWORD', 'correct-horse', { secret: true });
+    await host.request('Enter');
+    const error = (await session.waitForText('MAIN MENU', { timeout: 1500 }).catch((e: unknown) => e)) as Error;
+    expect(error.message).toContain('MAIN MENU did not appear within 1500ms - the keyboard stayed locked');
+    expect(error.message).toContain('The screen was:');
+  });
+
+  test('the transport is given longer than the Wait it carries, so the session reports the timeout, with the screen', async () => {
+    const host = createSampleMainframe({});
+    const seen: Array<{ command: string; timeoutMs?: number }> = [];
+    const recording: mainframe.Tn3270Transport = {
+      request: (command, options) => (seen.push({ command, timeoutMs: options?.timeoutMs }), host.request(command)),
+      close: () => host.close(),
+    };
+    const session = await Tn3270Session.connect(recording, { host: 'h' }, { timeoutMs: 90_000, pollMs: 20 });
+    await session.waitForUnlock(90_000);
+    const wait = seen.find((s) => s.command === 'Wait(90,Unlock)');
+    expect(wait?.timeoutMs).toBeGreaterThan(90_000);
+  });
+
+  test('TN3270_TIMEOUT_MS sets the default session timeout; a bad value is rejected', async () => {
+    process.env.TN3270_TIMEOUT_MS = '7000';
+    try {
+      const host = createSampleMainframe({});
+      const session = await Tn3270Session.connect(host, { host: 'h' });
+      await session.waitForUnlock();
+      expect(host.commands).toContain('Wait(7,Unlock)');
+      process.env.TN3270_TIMEOUT_MS = 'soon';
+      await expect(Tn3270Session.connect(createSampleMainframe({}), { host: 'h' })).rejects.toThrow(/TN3270_TIMEOUT_MS "soon"/);
+    } finally {
+      delete process.env.TN3270_TIMEOUT_MS;
+    }
   });
 });

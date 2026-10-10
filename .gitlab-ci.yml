@@ -65,6 +65,7 @@ build:
     - npm ci
     - npm run build
     - npm run lint
+    - npm run typecheck   # type-checks the tests too: Playwright runs them without checking types
   artifacts:
     paths:
       - dist/
@@ -88,17 +89,36 @@ test:
 
 # ---- Security gates: dependency audit + secret scan ----
 #
-# automation-audit-gate fails on high/critical advisories unless audit-allowlist.json accepts them - each exception
-# has an owner, a reason and an EXPIRY DATE, so an accepted risk is re-decided on purpose. automation-scan-secrets
-# fails if a secret is about to be committed (and never prints it). Both ship in @automation/referenced-automation-utils.
-# allow_failure is true until this job has run green on your GitLab (the audit needs NPM_REGISTRY_URL to be reachable
-# and to support `npm audit`) - then set it to false.
+# automation-scan-secrets fails (exit 1) if a secret is about to be committed (and never prints it).
+# automation-audit-gate fails (exit 1) on high/critical advisories unless audit-allowlist.json accepts them - each
+# exception has an owner, a reason and an EXPIRY DATE, so an accepted risk is re-decided on purpose. It exits 2 when the
+# audit itself could not run (registry unreachable); only that exit code may fail without stopping the pipeline, so a
+# finding blocks and a network problem does not. Both ship in @automation/referenced-automation-utils.
+# --allow-unassigned: the allowlist's owner is still "UNASSIGNED" (audit item GOV-01, a decision for the team).
+# Remove the flag when a person or team is named in audit-allowlist.json.
 security:
   stage: test
   needs: ["build"]
-  allow_failure: true
+  allow_failure:
+    exit_codes: 2
   script:
     - npm ci
     - npm run build
     - node dist/cli/scanSecrets.js
-    - node dist/cli/auditGate.js
+    - node dist/cli/auditGate.js --allow-unassigned
+
+# ---- Fortnightly framework audit (start it by hand with this job's play button) ----
+# Automated part of the audit: see docs/governance/AUDIT.md. Set AUDIT_RUN_GATES=1 to also run the gates (slow).
+audit:
+  stage: test
+  needs: ["build"]
+  when: manual
+  allow_failure: true
+  script:
+    - npm ci
+    - node dist/cli/frameworkAudit.js --out audit-reports ${AUDIT_RUN_GATES:+--run}
+  artifacts:
+    when: always
+    paths:
+      - audit-reports/
+    expire_in: 90 days

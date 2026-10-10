@@ -37,7 +37,8 @@ export class Tn3270Error extends Error {
  * what `s3270` prints. Production uses S3270Transport; tests and local trials use FakeMainframe.
  */
 export interface Tn3270Transport {
-  request(command: string): Promise<Tn3270Reply>;
+  /** `options.timeoutMs` overrides the transport's own per-command limit for this command (a long `Wait` needs more). */
+  request(command: string, options?: { timeoutMs?: number }): Promise<Tn3270Reply>;
   close(): Promise<void>;
 }
 

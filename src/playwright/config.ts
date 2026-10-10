@@ -1,4 +1,5 @@
-import type { PlaywrightTestConfig, Project } from '@playwright/test';
+import * as os from 'node:os';
+import type { PlaywrightTestConfig, PlaywrightTestOptions, PlaywrightWorkerOptions, Project } from '@playwright/test';
 import { loadEnv } from '../config/env';
 
 export interface CreatePlaywrightConfigOptions {
@@ -22,14 +23,42 @@ export interface CreatePlaywrightConfigOptions {
   auth?: { setupMatch: string | RegExp; storageState: string };
   /** Include the Allure reporter. On by default; skipped automatically if `allure-playwright` isn't installed. */
   allure?: boolean;
-  /** Extra projects appended after the BROWSER/DEVICE-selected ones. */
+  /**
+   * Extra projects appended after the BROWSER/DEVICE-selected ones (e.g. a BDD project). One that does not choose a
+   * browser itself (`browserName`, `defaultBrowserType` or `channel` in its `use`) inherits the `use` of the selected
+   * BROWSER/DEVICE project - so on a firefox CI leg it runs in firefox, the browser that leg installed, not in a
+   * chromium that is not there. With BROWSER=all it inherits the first selected project.
+   */
   extraProjects?: Project[];
+  /**
+   * Upper bound for WORKERS (a number, or a percentage of cores, as Playwright accepts). A suite whose tests share one
+   * stateful system (one SAP GUI session) passes 1: no environment variable can then start a second worker. Without
+   * it, WORKERS is handed to Playwright unchanged.
+   */
+  maxWorkers?: number;
+  /** Run tests inside a file in parallel too. Default true; false for suites whose tests in a file depend on each other. */
+  fullyParallel?: boolean;
   /** Shallow-merged over the result last - an escape hatch, not the normal path. */
   overrides?: Partial<PlaywrightTestConfig>;
 }
 
 const SYSTEM_BROWSER_CHANNELS = ['msedge', 'msedge-beta', 'msedge-dev', 'chrome', 'chrome-beta', 'chrome-dev'];
 const DEFAULT_DEVICE_PROJECT_NAMES = ['iPhone 15', 'Pixel 7', 'iPad Pro 11'];
+
+/** WORKERS capped at `max`: a plain number, or a percentage of the logical cores (as Playwright reads it). */
+function cappedWorkers(raw: string | undefined, max: number): number {
+  if (!Number.isInteger(max) || max < 1) throw new Error(`maxWorkers must be a whole number >= 1 (got ${max})`);
+  const cores = os.cpus().length || 1;
+  let requested = Math.max(1, Math.floor(cores / 2)); // Playwright's own default
+  if (raw !== undefined && raw.trim() !== '') {
+    const text = raw.trim();
+    const percent = /^(\d+(?:\.\d+)?)%$/.exec(text);
+    if (percent) requested = Math.max(1, Math.floor((cores * Number(percent[1])) / 100));
+    else if (/^\d+$/.test(text) && Number(text) >= 1) requested = Number(text);
+    else throw new Error(`WORKERS "${raw}" is not a number >= 1 or a percentage such as 50%`);
+  }
+  return Math.min(requested, max);
+}
 
 function allureInstalled(dir: string): boolean {
   try {
@@ -125,7 +154,14 @@ export function createPlaywrightConfig(options: CreatePlaywrightConfigOptions): 
       })),
     ];
   }
-  projects = [...projects, ...(options.extraProjects ?? [])];
+  const inheritedUse = browserProjects[0]?.use;
+  const choosesBrowser = (use: Partial<PlaywrightTestOptions & PlaywrightWorkerOptions> | undefined) => Boolean(use?.browserName || use?.defaultBrowserType || use?.channel);
+  projects = [
+    ...projects,
+    ...(options.extraProjects ?? []).map((project) =>
+      choosesBrowser(project.use) ? project : { ...project, use: { ...inheritedUse, ...project.use } },
+    ),
+  ];
 
   const reporters: NonNullable<PlaywrightTestConfig['reporter']> = [
     ['list'],
@@ -143,8 +179,11 @@ export function createPlaywrightConfig(options: CreatePlaywrightConfigOptions): 
   const config: PlaywrightTestConfig = {
     testDir: options.testDir ?? './tests',
     outputDir: './test-results',
-    fullyParallel: true,
-    workers: env.getOptional('WORKERS'),
+    fullyParallel: options.fullyParallel ?? true,
+    workers:
+      options.maxWorkers !== undefined
+        ? cappedWorkers(env.getOptional('WORKERS'), options.maxWorkers)
+        : env.getOptional('WORKERS'),
     retries,
     maxFailures: maxFailures || undefined,
     globalTimeout: globalTimeoutMs || undefined,

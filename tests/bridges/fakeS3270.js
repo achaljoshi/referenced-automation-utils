@@ -3,7 +3,7 @@
  * A stand-in for `s3270`: the same line protocol (a command per line in; `data: ...` lines, a status line and
  * `ok`/`error` out), backed by the in-memory 3270 simulator, so the transport can be tested for real on any machine.
  * Fault injection: S3270_HANG=Enter (never answer it), S3270_CRASH=Ascii (write to stderr and exit 3 when it arrives),
- * S3270_DELAY_MS=150 (host unlock delay).
+ * S3270_DELAY_MS=150 (host unlock delay), S3270_SLOW=Home:500 (answer that command only after 500 ms - a late reply).
  */
 const readline = require('node:readline');
 const path = require('node:path');
@@ -33,6 +33,8 @@ async function pump() {
       process.exit(3);
     }
     if (process.env.S3270_HANG === name) continue;
+    const [slowName, slowMs] = (process.env.S3270_SLOW || ':').split(':');
+    if (slowName === name) await new Promise((resolve) => setTimeout(resolve, Number(slowMs)));
     try {
       const reply = await host.request(command);
       for (const d of reply.data) out(`data: ${d}`);

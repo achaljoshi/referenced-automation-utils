@@ -95,6 +95,49 @@ test.describe('createPlaywrightConfig', () => {
     expect(names(withEnv(clean, () => createPlaywrightConfig({ dir })))).toEqual(['list', 'html', 'junit', 'json']);
   });
 
+  test('an extra project that chooses no browser inherits the selected BROWSER project (a firefox leg runs BDD in firefox)', () => {
+    const bdd = { name: 'bdd', testDir: 'features-gen', use: { actionTimeout: 1234 } };
+    for (const browser of ['chromium', 'firefox', 'webkit']) {
+      const config = withEnv({ ...clean, BROWSER: browser }, () => createPlaywrightConfig({ dir, allure: false, extraProjects: [bdd] }));
+      const extra = config.projects?.find((p) => p.name === 'bdd');
+      const selected = config.projects?.find((p) => p.name === browser);
+      expect(extra?.use?.defaultBrowserType).toBe(browser);
+      expect(extra?.use?.defaultBrowserType).toBe(selected?.use?.defaultBrowserType);
+      expect(extra?.use?.actionTimeout).toBe(1234); // its own settings still win
+    }
+    const edge = withEnv({ ...clean, BROWSER: 'msedge' }, () => createPlaywrightConfig({ dir, allure: false, extraProjects: [bdd] }));
+    expect(edge.projects?.find((p) => p.name === 'bdd')?.use?.channel).toBe('msedge');
+  });
+
+  test('an extra project that names its own browser keeps it, and does not inherit storageState from auth', () => {
+    const own = { name: 'own', use: { browserName: 'webkit' as const } };
+    const config = withEnv({ ...clean, BROWSER: 'firefox' }, () =>
+      createPlaywrightConfig({ dir, allure: false, extraProjects: [own, { name: 'bdd' }], auth: { setupMatch: /auth\.setup\.ts/, storageState: '.auth/user.json' } }),
+    );
+    expect(config.projects?.find((p) => p.name === 'own')?.use).toEqual({ browserName: 'webkit' });
+    const bdd = config.projects?.find((p) => p.name === 'bdd');
+    expect(bdd?.use?.defaultBrowserType).toBe('firefox');
+    expect(bdd?.use?.storageState).toBeUndefined();
+  });
+
+  test('maxWorkers caps WORKERS (a SAP suite passes 1), by number, percentage and default; without it WORKERS passes through', () => {
+    const workers = (env: Record<string, string | undefined>, maxWorkers?: number) =>
+      withEnv({ ...clean, ...env }, () => createPlaywrightConfig({ dir, allure: false, maxWorkers })).workers;
+    expect(workers({ WORKERS: '8' }, 1)).toBe(1);
+    expect(workers({ WORKERS: '100%' }, 1)).toBe(1);
+    expect(workers({ WORKERS: undefined }, 1)).toBe(1);
+    expect(workers({ WORKERS: '2' }, 4)).toBe(2);
+    expect(workers({ WORKERS: '8' }, 4)).toBe(4);
+    expect(workers({ WORKERS: '8' })).toBe('8');
+    expect(() => workers({ WORKERS: 'lots' }, 1)).toThrow(/WORKERS "lots"/);
+    expect(() => workers({}, 0)).toThrow(/maxWorkers/);
+  });
+
+  test('fullyParallel defaults to true and can be turned off', () => {
+    expect(withEnv(clean, () => createPlaywrightConfig({ dir, allure: false, fullyParallel: false })).fullyParallel).toBe(false);
+    expect(withEnv(clean, () => createPlaywrightConfig({ dir, allure: false })).fullyParallel).toBe(true);
+  });
+
   test('overrides are merged last', () => {
     const config = withEnv(clean, () => createPlaywrightConfig({ dir, allure: false, overrides: { timeout: 1234 } }));
     expect(config.timeout).toBe(1234);

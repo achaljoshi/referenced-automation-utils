@@ -1,4 +1,5 @@
 import * as fs from 'node:fs';
+import * as path from 'node:path';
 
 interface JsonResult {
   status?: string;
@@ -25,6 +26,8 @@ interface JsonSuite {
 export interface PlaywrightJsonReport {
   suites?: JsonSuite[];
   stats?: { duration?: number };
+  /** Errors of the run itself (a config or global-setup failure, "no tests found"), not of any one test. */
+  errors?: Array<{ message?: string }>;
 }
 
 export interface TestOutcome {
@@ -45,6 +48,10 @@ export interface RunSummary {
   flaky: number;
   skipped: number;
   durationMs: number;
+  /** Tests that actually ran: passed + failed + flaky (not skipped). */
+  executed: number;
+  /** Top-level errors of the run (see PlaywrightJsonReport.errors), first line each. */
+  errors: string[];
   outcomes: TestOutcome[];
   byProject: Record<string, { passed: number; failed: number; flaky: number; skipped: number }>;
 }
@@ -107,6 +114,16 @@ export function summarize(report: PlaywrightJsonReport): RunSummary {
     flaky: outcomes.filter((o) => o.status === 'flaky').length,
     skipped: outcomes.filter((o) => o.status === 'skipped').length,
     durationMs: report.stats?.duration ?? 0,
+    executed: outcomes.filter((o) => o.status !== 'skipped').length,
+    errors: (report.errors ?? []).map(
+      (e) =>
+        (e.message ?? 'unknown error')
+          .replace(ANSI, '')
+          .split('\n')
+          .find((l) => l.trim())
+          ?.trim()
+          .slice(0, 300) ?? 'unknown error',
+    ),
     outcomes,
     byProject,
   };
@@ -137,16 +154,42 @@ export function toHistoryRecord(summary: RunSummary, at = new Date()): HistoryRe
 }
 
 export function appendHistory(file: string, record: HistoryRecord): void {
+  fs.mkdirSync(path.dirname(file), { recursive: true }); // the CI cache is empty on the first run: no .ci-history/ yet
   fs.appendFileSync(file, `${JSON.stringify(record)}\n`);
 }
 
+function isHistoryRecord(value: unknown): value is HistoryRecord {
+  const r = value as Partial<HistoryRecord> | null;
+  return (
+    r !== null &&
+    typeof r === 'object' &&
+    typeof r.at === 'string' &&
+    Array.isArray(r.failedTitles) &&
+    Array.isArray(r.flakyTitles)
+  );
+}
+
+/** The history file's records, and how many lines were unreadable (a half-written append, a merge conflict) and skipped. */
+export function loadHistoryWithSkips(file: string): { records: HistoryRecord[]; skipped: number } {
+  if (!fs.existsSync(file)) return { records: [], skipped: 0 };
+  const records: HistoryRecord[] = [];
+  let skipped = 0;
+  for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      const parsed: unknown = JSON.parse(line);
+      if (isHistoryRecord(parsed)) records.push(parsed);
+      else skipped++;
+    } catch {
+      skipped++;
+    }
+  }
+  return { records, skipped };
+}
+
+/** Like `loadHistoryWithSkips`, records only: one corrupt line never kills the report. */
 export function loadHistory(file: string): HistoryRecord[] {
-  if (!fs.existsSync(file)) return [];
-  return fs
-    .readFileSync(file, 'utf8')
-    .split('\n')
-    .filter((l) => l.trim())
-    .map((l) => JSON.parse(l) as HistoryRecord);
+  return loadHistoryWithSkips(file).records;
 }
 
 export interface Offender {
@@ -195,6 +238,13 @@ export function markdownRunReport(
   options: { slowest?: number; offenders?: Offender[] } = {},
 ): string {
   const lines = ['# Test run report', ''];
+  if (summary.errors.length)
+    lines.push(
+      '**The run itself reported errors** - the numbers below may be incomplete:',
+      '',
+      ...summary.errors.map((e) => `- ${e}`),
+      '',
+    );
   lines.push(
     `${summary.total} tests: **${summary.passed} passed**, ${summary.failed ? `**${summary.failed} failed**` : '0 failed'}, ${summary.flaky ? `**${summary.flaky} flaky**` : '0 flaky'}, ${summary.skipped} skipped, in ${(summary.durationMs / 1000).toFixed(1)} s.`,
     '',

@@ -21,13 +21,15 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "clean": "rimraf dist *.tgz",
-    "lint": "eslint . --ext .ts",
+    "lint": "eslint . --ext .ts --max-warnings 0",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "format": "prettier --write .",
     "test": "playwright test",
     "pretest": "npm run build",
     "prepack": "npm run build",
-    "security": "node dist/cli/auditGate.js && node dist/cli/scanSecrets.js"
+    "security": "node dist/cli/auditGate.js --allow-unassigned && node dist/cli/scanSecrets.js",
+    "audit": "node dist/cli/frameworkAudit.js --run",
+    "audit:quick": "node dist/cli/frameworkAudit.js"
   },
   "dependencies": {
     "@faker-js/faker": "^9.9.0",
@@ -83,6 +85,7 @@
   "bin": {
     "automation-audit-gate": "./dist/cli/auditGate.js",
     "automation-scan-secrets": "./dist/cli/scanSecrets.js",
-    "automation-run-report": "./dist/cli/runReport.js"
+    "automation-run-report": "./dist/cli/runReport.js",
+    "automation-framework-audit": "./dist/cli/frameworkAudit.js"
   }
 }

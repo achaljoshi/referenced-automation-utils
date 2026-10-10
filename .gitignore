@@ -19,6 +19,9 @@ logs/
 .env.local
 .env.*.local
 
+# Secrets files the SAP layer's providers use (DPAPI-protected, per user and machine) - never commit
+.secrets/
+
 # OS / editor
 .DS_Store
 Thumbs.db
@@ -45,3 +48,6 @@ out/
 .project
 .classpath
 .settings/
+
+# fortnightly audit output (keep it between audits; see docs/governance/AUDIT.md)
+audit-reports/

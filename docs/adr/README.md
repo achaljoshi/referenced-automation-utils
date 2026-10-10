@@ -16,3 +16,4 @@ One short file per decision that shapes the whole framework family: what was dec
 | [0008](0008-sap-gui-transport.md) | SAP GUI: a transport seam, PowerShell by default, a Java/JACOB fallback |
 | [0009](0009-security-gates.md) | Security gates in CI: dependency audit with expiring exceptions, and secret scanning |
 | [0010](0010-packages-installed-by-version-from-the-registry.md) | Shared packages are installed by version from the npm registry; local tarballs are the fallback |
+| [0011](0011-fortnightly-manual-framework-audit.md) | A fortnightly, manually triggered framework audit: automated checks plus a judgement review |

@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { AdapterError } from '../src/adapters/adapter';
 import { SmtpClient } from '../src/email/smtpClient';
 import { startSmtpTestServer, stopSmtpTestServer, type SmtpTestServerHandle } from '../src/testing';
 
@@ -58,7 +59,27 @@ test.describe('SmtpClient @smoke', () => {
       auth: { user: server.username, pass: 'wrong-password' },
     });
 
-    await expect(badClient.verify()).rejects.toThrow();
+    // The authentication failure specifically (SMTP 535 / EAUTH), not just "some error": a refused connection or a typo
+    // in the host would also reject, and must not let this test pass.
+    const error = await badClient.verify().then(
+      () => undefined,
+      (e: unknown) => e as AdapterError,
+    );
+    expect(error).toBeInstanceOf(AdapterError);
+    expect(error?.message).toContain('Invalid login');
+    expect(error?.cause).toMatchObject({ code: 'EAUTH', responseCode: 535 });
     badClient.close();
+  });
+
+  test('an unreachable server is a connection error, distinct from an authentication error', async () => {
+    const unreachable = new SmtpClient({ host: '127.0.0.1', port: 1, secure: false, auth: { user: 'u', pass: 'p' } });
+    const error = await unreachable.verify().then(
+      () => undefined,
+      (e: unknown) => e as AdapterError,
+    );
+    expect(error).toBeInstanceOf(AdapterError);
+    expect((error?.cause as { code?: string } | undefined)?.code).toBe('ESOCKET');
+    expect(error?.message).not.toContain('Invalid login');
+    unreachable.close();
   });
 });

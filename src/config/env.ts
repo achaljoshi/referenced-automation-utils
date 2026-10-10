@@ -2,6 +2,9 @@ import * as dotenv from 'dotenv';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
+const TRUE_VALUES = ['true', '1', 'yes', 'on'];
+const FALSE_VALUES = ['false', '0', 'no', 'off'];
+
 /**
  * Typed accessor over whatever env file got loaded. Every consuming repo's
  * playwright.config.ts (and any test/helper) goes through this instead of
@@ -10,9 +13,16 @@ import * as path from 'node:path';
  */
 export class ConfigReader {
   private readonly values: Record<string, string>;
+  private readonly declared: Set<string>;
 
-  constructor(values: Record<string, string>) {
+  /**
+   * @param values every value the reader resolves (loadEnv also folds the process environment in, so it wins over files).
+   * @param declaredKeys which of those keys were explicitly configured (from .env files or the caller); defaults to all
+   *   of `values`. Only these are exposed by toObject() - the rest of the process environment (CI secrets) is not.
+   */
+  constructor(values: Record<string, string>, declaredKeys?: Iterable<string>) {
     this.values = values;
+    this.declared = new Set(declaredKeys ?? Object.keys(values));
   }
 
   get(key: string, defaultValue?: string): string {
@@ -36,24 +46,33 @@ export class ConfigReader {
       }
       return defaultValue;
     }
-    const parsed = Number.parseInt(raw, 10);
-    if (Number.isNaN(parsed)) {
+    // Whole-string match: parseInt('12abc') would silently give 12.
+    if (!/^[+-]?\d+$/.test(raw.trim())) {
       throw new Error(`Config key "${key}" = "${raw}" is not a valid integer`);
     }
-    return parsed;
+    return Number.parseInt(raw.trim(), 10);
   }
 
+  /** true/false, 1/0, yes/no, on/off (any case). Anything else throws: HEADLESS=ture must not silently mean "headed". */
   getBoolean(key: string, defaultValue = false): boolean {
     const raw = this.getOptional(key);
     if (raw === undefined) return defaultValue;
-    return raw.trim().toLowerCase() === 'true';
+    const normalised = raw.trim().toLowerCase();
+    if (TRUE_VALUES.includes(normalised)) return true;
+    if (FALSE_VALUES.includes(normalised)) return false;
+    throw new Error(
+      `Config key "${key}" = "${raw}" is not a valid boolean (use true/false, 1/0, yes/no or on/off)`,
+    );
   }
 
-  /** Comma-separated list, e.g. FEATURE_FLAGS=a,b,c -> ['a', 'b', 'c'] */
+  /** Comma-separated list, e.g. FEATURE_FLAGS=a,b,c -> ['a', 'b', 'c']. Empty entries ("a,,b," ) are dropped. */
   getList(key: string, defaultValue: string[] = []): string[] {
     const raw = this.getOptional(key);
     if (raw === undefined || raw.trim() === '') return defaultValue;
-    return raw.split(',').map((entry) => entry.trim());
+    return raw
+      .split(',')
+      .map((entry) => entry.trim())
+      .filter((entry) => entry !== '');
   }
 
   has(key: string): boolean {
@@ -65,9 +84,17 @@ export class ConfigReader {
     return this.get('ENV', 'qa');
   }
 
-  /** Snapshot of every key this reader knows about (env file + process.env keys it saw). */
+  /**
+   * Snapshot of the keys that were explicitly configured (the loaded .env files / the values passed in), with their
+   * effective values. It never includes the rest of process.env, so logging it cannot dump CI secrets.
+   */
   toObject(): Record<string, string> {
-    return { ...this.values };
+    const out: Record<string, string> = {};
+    for (const key of this.declared) {
+      const value = this.values[key];
+      if (value !== undefined) out[key] = value;
+    }
+    return out;
   }
 }
 
@@ -98,12 +125,14 @@ export function loadEnv(options: LoadEnvOptions = {}): ConfigReader {
   const name = options.env ?? process.env.ENV ?? process.env.ENVIRONMENT ?? 'qa';
 
   const values: Record<string, string> = { ENV: name };
+  const declared = new Set<string>(['ENV']);
 
   for (const file of ['.env', `.env.${name}`, `.env.${name}.local`]) {
     const fullPath = path.join(dir, file);
     if (fs.existsSync(fullPath)) {
       const parsed = dotenv.parse(fs.readFileSync(fullPath));
       Object.assign(values, parsed);
+      for (const key of Object.keys(parsed)) declared.add(key);
     }
   }
 
@@ -114,5 +143,5 @@ export function loadEnv(options: LoadEnvOptions = {}): ConfigReader {
   }
   values.ENV = name;
 
-  return new ConfigReader(values);
+  return new ConfigReader(values, declared);
 }

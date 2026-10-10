@@ -10,6 +10,12 @@ export interface SftpTestServerHandle {
   password: string;
   /** The real local directory backing the server's file tree - "/" on the SFTP side maps to this on disk. */
   root: string;
+  /** The server's host key fingerprint in OpenSSH form (`SHA256:<base64>`), for exercising `SftpConfig.hostFingerprint`. */
+  fingerprint: string;
+  /** Abruptly ends every open client connection (the server keeps listening) - a dropped network link, as seen by the client. */
+  dropConnections(): void;
+  /** How many client connections are currently open. */
+  openConnections(): number;
   stop(): Promise<void>;
 }
 
@@ -54,7 +60,7 @@ export async function startSftpTestServer(): Promise<SftpTestServerHandle> {
   // require, not import(): ssh2 is CommonJS with lazily-defined exports, and a native dynamic
   // import() (which test runners may leave untouched) can't see `Server` on it.
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { Server } = require('ssh2') as typeof import('ssh2');
+  const { Server, utils } = require('ssh2') as typeof import('ssh2');
   const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'sftp-test-'));
   const username = 'testuser';
   const password = 'testpass';
@@ -65,7 +71,17 @@ export async function startSftpTestServer(): Promise<SftpTestServerHandle> {
     publicKeyEncoding: { type: 'spki', format: 'pem' },
   });
 
+  const parsed = utils.parseKey(privateKey);
+  const hostKey = Array.isArray(parsed) ? parsed[0] : parsed;
+  if (!hostKey || hostKey instanceof Error) throw new Error('could not read the generated SFTP test host key');
+  const fingerprint = `SHA256:${crypto.createHash('sha256').update(hostKey.getPublicSSH()).digest('base64').replace(/=+$/, '')}`;
+
+  const connections = new Set<{ end(): void }>();
   const server = new Server({ hostKeys: [privateKey] }, (client) => {
+    connections.add(client);
+    client.on('close', () => connections.delete(client));
+    // a client that aborts the handshake (e.g. it refused our host key) is an 'error' here, and must not crash the test process
+    client.on('error', () => undefined);
     client
       .on('authentication', (ctx) => {
         if (ctx.method === 'password' && ctx.username === username && ctx.password === password) {
@@ -193,7 +209,8 @@ export async function startSftpTestServer(): Promise<SftpTestServerHandle> {
             sftp.on('RMDIR', (reqid: number, dirPath: string) => {
               const resolved = toRemoteRoot(root, dirPath);
               try {
-                fs.rmSync(resolved, { recursive: true, force: true });
+                // like a real server: an empty directory only (a non-empty one is a failure, not a recursive delete)
+                fs.rmdirSync(resolved);
                 sftp.status(reqid, STATUS_CODE.OK);
               } catch {
                 sftp.status(reqid, STATUS_CODE.FAILURE);
@@ -226,7 +243,14 @@ export async function startSftpTestServer(): Promise<SftpTestServerHandle> {
     username,
     password,
     root,
+    fingerprint,
+    openConnections: () => connections.size,
+    dropConnections: () => {
+      for (const connection of connections) connection.end();
+    },
     stop: async () => {
+      // server.close() waits for open connections, so a client that was never closed would hang the test run
+      for (const connection of connections) connection.end();
       await new Promise<void>((resolve) => server.close(() => resolve()));
       await fs.promises.rm(root, { recursive: true, force: true });
     },

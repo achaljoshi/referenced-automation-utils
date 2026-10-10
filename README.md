@@ -19,13 +19,13 @@ npm test                # runs this package's own unit tests
 
 | Module | What it's for |
 |---|---|
-| `config/env` | `loadEnv()` - loads `.env.<ENV>` based on the `ENV` variable, typed `get`/`getInt`/`getBoolean`/`getList` accessors. See [Environments](#environments). |
+| `config/env` | `loadEnv()` - loads `.env.<ENV>` based on the `ENV` variable, typed `get`/`getInt`/`getBoolean`/`getList` accessors - strict: `getBoolean` takes true/false/1/0/yes/no/on/off and `getInt` a whole number, anything else throws; `toObject()` returns only the keys from your `.env` files, never the rest of the process environment. See [Environments](#environments). |
 | `logger/logger` | Console + `logs/automation.log` logging (winston), plus `loggedStep()` to wrap any action with start/pass/fail logging. Reads correctly in a terminal **and** a raw CI log - see [Logging](#logging-local-and-ci). |
-| `logger/correlation` | A per-test correlation ID (`getCorrelationId`, `withCorrelationId`, `useTestCorrelation`) stamped on every log line and sent as `X-Correlation-Id` by the API client, so one failing flow can be grepped across the console, the API gateway and SAP. |
+| `logger/correlation` | A per-test correlation ID (`getCorrelationId`, `withCorrelationId` - AsyncLocalStorage-scoped, so overlapping calls do not clobber each other - `useTestCorrelation`) stamped on every log line and sent as `X-Correlation-Id` by the API client, so one failing flow can be grepped across the console, the API gateway and SAP. |
 | `adapters` (`Adapter`, `adapterStep`, `AdapterError`) | The contract every outside system (SMTP, SFTP, SQLite, SAP GUI) follows: a `name`, `healthCheck()`, `close()`, and every operation logged with timing and failures wrapped as `AdapterError('[sftp] upload failed: ...')`. Write a new client against it and it behaves like the rest. |
 | `mainframe` (`Tn3270Session`) | A 3270 terminal session over `s3270` (the scriptable emulator from the x3270 suite), with the waiting a hand-written script forgets: every Enter/PF key waits for the host to answer, reads are never of the previous screen, and a failure shows the screen as it was. See [Mainframe (3270)](#mainframe-3270). |
-| `testing` | In-process SMTP and SFTP servers for tests (`testing.startSmtpTestServer()`, `testing.startSftpTestServer()`), shared by every repo instead of copied into each. |
-| `placeholders` (`ScenarioVariables`, `randomValue`, `relativeDate`) | `{{name}}`, `{{env:X\|fallback}}`, `{{uuid}}`, `{{random:email}}`, `{{date:+7d}}` placeholders for unique/fresh/env-driven test data; fails loudly when one cannot be resolved. See [Placeholders](#placeholders-for-test-data). |
+| `testing` | In-process SMTP, IMAP and SFTP servers for tests (`testing.startSmtpTestServer()`, `testing.startImapTestServer()`, `testing.startSftpTestServer()`), shared by every repo instead of copied into each. |
+| `placeholders` (`ScenarioVariables`, `randomValue`, `relativeDate`) | `{{name}}`, `{{env:X\|fallback}}`, `{{uuid}}`, `{{random:email}}`, `{{date:+7d}}` placeholders for unique/fresh/env-driven test data; fails loudly when one cannot be resolved; `{{env:X}}` refuses the credentials a CI system injects (`CI_JOB_TOKEN`, `CI_REGISTRY_PASSWORD`, `CI_JOB_JWT*`, ...) and `{{random:email}}` only uses reserved example domains. See [Placeholders](#placeholders-for-test-data). |
 | `playwright/config` (`createPlaywrightConfig`) | One Playwright config for the whole family: `BROWSER`/`DEVICE`/timeouts/reporters from `.env.<name>`, optional log-in-once `auth` project. Each repo's `playwright.config.ts` is now ~5 lines. See [Shared Playwright config](#shared-playwright-config). |
 | `crypto` | md5/sha1/sha256/sha512, hmac, base64, and `mask()` for logging sensitive values safely. |
 | `dateUtils` | Thin `dayjs`-based helpers: format/parse, add days/months/hours/minutes, diff, compare, epoch conversion. |
@@ -33,9 +33,9 @@ npm test                # runs this package's own unit tests
 | `jsonUtils` / `yamlUtils` | Parse/stringify/read-from-file, plus `readAt()` for path-based reads on raw JSON text. |
 | `csvUtils` / `excelUtils` | Read/write CSV and `.xlsx` as arrays of row objects - the shape data-driven tests want. |
 | `validation` (`getPath`/`setPath`/`hasPath`/`requirePath`) | Dot/bracket path traversal over any object, e.g. `getPath(response, 'data.users[0].name')`. This is what the API framework's response wrapper is built on. |
-| `validation` (`validateSchema`) | JSON Schema (draft-07/2019/2020) validation via `ajv`, with a ready-to-assert `errorsText`. |
+| `validation` (`validateSchema`) | JSON Schema (draft-07/2019/2020) validation via `ajv`, with a ready-to-assert `errorsText`. Compiled schemas are cached (a schema with an `$id` can be used by any number of tests) and strict: a misspelt keyword (`requried`) or format throws instead of passing everything; `{ strict: false }` for a schema you do not own. |
 | `db` (`DbClient`, `SqliteClient`) | A driver-agnostic query/update contract; implement it once per real DB engine your project needs. `SqliteClient` is a ready-to-use reference implementation. |
-| `emailUtils` | One-off `sendEmail()` (nodemailer) and `findEmailBySubject()` to search an inbox (imapflow) - for OTP/verification-email assertions. |
+| `emailUtils` | One-off `sendEmail()` (nodemailer) and `findEmailBySubject()` to search an inbox (imapflow) - for OTP/verification-email assertions: the NEWEST unseen match wins, `to` / `since` pick out your own message when tests share a mailbox, and the message is marked seen afterwards (`markSeen: false` keeps it). Tested against an in-process IMAP server (`testing.startImapTestServer`). |
 | `SmtpClient` | A reusable SMTP connection for sending several emails without reconnecting each time - `connect once, send many, close`, unlike `emailUtils.sendEmail()`'s one-shot connection. |
 | `SftpClient` | A pure Node.js SFTP client (connect/upload/download/list/exists/delete/mkdir/rmdir) - the same job WinSCP does interactively, but scriptable and identical on Windows, macOS/Linux, and GitLab CI's Linux runners, with no WinSCP install required anywhere. |
 
@@ -51,11 +51,11 @@ npm test                # runs this package's own unit tests
 - **One stream, stdout.** Lines are never split across stdout/stderr, so their order survives in a CI job log.
 - **Colour only in a real terminal.** Off when `CI` or `NO_COLOR` is set, so GitLab logs contain no escape codes; `FORCE_COLOR=1` turns it back on.
 - **`[w2]` is the Playwright worker, `[cid:ad9e928b]` the test's correlation ID.** With parallel workers, interleaved lines are unreadable without them. `grep ad9e928b` follows one test everywhere.
-- **Secrets are redacted** before anything is written: any value under a key that looks like `password`, `token`, `authorization`, `secret`, `api key`, `cookie` or `credential`.
+- **Secrets are redacted** before anything is written: any value, at any depth, under a key that names a secret - matched as whole words (`password`, `token`, `authorization`, `secret`, `api key`, `cookie`, `credential`, `jwt`, `session`, `bearer`, `private`), so `passed`, `bypass` and `passport` are kept. Free text is scrubbed too: `Bearer <token>`, `Authorization:` headers, JWTs, `scheme://user:pass@host` and `password=...` in a message or an error. A cyclic object is cut, not followed.
 - **Errors are readable**: ANSI codes from Playwright's messages are stripped, multi-line messages stay multi-line.
 - **A file as well** (`logs/automation.log`, JSON lines - a CI artifact). If it can't be created (read-only checkout) the logger carries on with the console rather than failing the run.
 
-`LOG_LEVEL` (default `info`), `LOG_TO_FILE=false`, `LOG_FILE=<path>`, `NO_COLOR=1`, `FORCE_COLOR=1`. `tests/logger.spec.ts` asserts all of this against a real child process's output.
+`LOG_LEVEL` (default `info`), `LOG_TO_FILE=false`, `LOG_FILE=<path>`, `LOG_FILE_PER_WORKER=true` (one rotated file per Playwright worker, `automation-w2.log`, instead of every worker appending to one), `NO_COLOR=1`, `FORCE_COLOR=1`. `tests/logger.spec.ts` asserts all of this against a real child process's output.
 
 ## Adapters
 
@@ -74,7 +74,7 @@ That one wrapper gives every client the same behaviour: `[sftp] upload ... {"rem
 ```ts
 import { mainframe } from '@automation/referenced-automation-utils';
 
-const transport = new mainframe.S3270Transport({ command: env.getOptional('S3270_PATH') });   // needs the x3270 suite's s3270
+const transport = new mainframe.S3270Transport();   // needs the x3270 suite's s3270 on the PATH, or at $S3270_PATH (or pass { command })
 const term = await mainframe.Tn3270Session.connect(transport, { host: env.get('MAINFRAME_HOST'), port: 23 });
 
 await term.fillAfterLabel('USERID', env.get('MF_USER'));                    // finds the label, types in the field after it
@@ -113,6 +113,8 @@ export default createPlaywrightConfig({ dir: __dirname, name: '@automation/my-pr
 
 Everything else comes from `.env.<name>` or the environment (`BROWSER`, `DEVICE`, `HEADLESS`, `WORKERS`, `RETRIES`, `TEST_TIMEOUT_MS`, ...; the full list is in the function's doc comment). An unknown `BROWSER` fails immediately with the valid names instead of silently running chromium. Log in once and reuse it everywhere with `auth: { setupMatch: /auth\.setup\.ts/, storageState: AUTH_FILE }` - see `referenced-automation-ui-api` for a working example.
 
+Options worth knowing: `extraProjects` that do not choose a browser themselves (a BDD project) **inherit the selected `BROWSER`/`DEVICE` project's `use`**, so a firefox CI leg runs them in firefox, the browser it installed; `maxWorkers: 1` caps `WORKERS` for suites that share one stateful system (SAP) so no variable can start a second worker; `fullyParallel: false` turns off in-file parallelism. Boolean and integer variables are strict - `HEADLESS=ture` or `RETRIES=2x` fails at start-up instead of silently meaning something else.
+
 ## Placeholders for test data
 
 `placeholders.ScenarioVariables` is a scenario's named values plus `{{...}}` placeholders, for data that must be unique, fresh or environment-driven instead of hard-coded: `{{name}}` (a saved value), `{{env:NAME|fallback}}`, `{{uuid}}`, `{{timestamp}}`, `{{random:email}}` / `alnum(8)` / `number(1,100)`, `{{date:+7d}}` / `{{date:-1M|DD/MM/YYYY}}`. An unresolvable placeholder throws and names what is known - it is never sent to a system as literal text. The UI and API packages use it for their Gherkin steps and test fixtures (`vars`); it has nothing to do with BDD itself and works in any test.
@@ -122,7 +124,7 @@ Everything else comes from `.env.<name>` or the environment (`BROWSER`, `DEVICE`
 Playwright already waits inside every action and web-first assertion, so a fixed sleep is either too short (flaky) or too long (slow). The family enforces this rather than hoping:
 
 - `ui`'s state reads (`isVisible`, `isEnabled`, `isChecked`, `count`, `allText`) **wait** up to the expect timeout; pass `{ timeout: 0 }` only to read the state *right now* (asserting something is **not** there).
-- ESLint **errors** on `waitForTimeout` and on `'networkidle'` in `ui`, `sap` and `ui-api`.
+- ESLint **errors** on `waitForTimeout` and on `'networkidle'` in `utils` (`tests/lintRules.spec.ts` proves the rule fires), `ui`, `sap` and `ui-api`, and on a floating or misused promise (`no-floating-promises`, `no-misused-promises`: a missing `await` turns an assertion into one that cannot fail). `npm run lint` fails on any warning, and CI also runs `npm run typecheck`.
 - `ui/tests/noWaits.spec.ts` proves it against a page that renders late.
 - The SAP GUI half has the same property by construction: every step waits for SAP to be idle and the element to exist.
 
@@ -143,9 +145,17 @@ All five repos must resolve **one** `playwright-core` (two copies mean two sets 
 { "allow": [ { "id": "GHSA-xxxx-xxxx-xxxx", "package": "name", "reason": "why this is acceptable", "owner": "team or person", "expires": "2027-03-31" } ] }
 ```
 
-An exception stops protecting you on its expiry date, so an accepted risk has to be re-decided on purpose rather than forgotten; entries that match nothing any more are reported (`--strict-allowlist` fails on them), and an exception inside 30 days of expiry warns. Exit code 2 means the audit itself could not run (offline, no registry).
+An exception stops protecting you on its expiry date, so an accepted risk has to be re-decided on purpose rather than forgotten; entries that match nothing any more are reported (`--strict-allowlist` fails on them), and an exception inside 30 days of expiry warns. Every entry needs `package`, a real `owner` (empty or `UNASSIGNED` is an error unless you pass `--allow-unassigned`) and an expiry no more than a year away (`--max-expiry-days` changes the limit). Exit codes: **1** the gate failed - a blocking advisory, an allowlist that breaks those rules, or an audit report the tool does not understand (it requires `auditReportVersion` 2 and a `metadata.vulnerabilities.total` that matches, and fails closed otherwise); **2** the audit could not run (offline, no registry, `npm` missing). The shared CI template lets only exit code 2 fail without blocking.
 
-**Currently accepted here:** `@faker-js/faker` GHSA-qxc2-j82w-r537 (high). The fix is v10.5+, which is ESM-only, and this family compiles to CommonJS on Node >=18, so it needs an ESM migration. Nothing in the family's own code calls `faker.helpers.fake()`, but `randomUtils` re-exports the whole faker API, so a project must not pass untrusted input to it. The entry has **no owner yet** and expires 2027-03-31 - name an owner in `audit-allowlist.json`.
+**Currently accepted here:** `@faker-js/faker` GHSA-qxc2-j82w-r537 (high). The fix is v10.5+, which is ESM-only, and this family compiles to CommonJS on Node >=18, so it needs an ESM migration. Nothing in the family's own code calls `faker.helpers.fake()`, but `randomUtils` re-exports the whole faker API, so a project must not pass untrusted input to it. The entry has **no owner yet** (so `npm run security` and the pipeline pass `--allow-unassigned` for now) and expires 2027-03-31 - name an owner in `audit-allowlist.json` and drop the flag.
+
+## Secret scan
+
+`npx automation-scan-secrets` (also in `npm run security` and the pipeline's `security` job) fails when a secret is about to be committed: private keys, cloud/CI tokens, **JWTs**, `Authorization: Bearer|Basic` headers (including `curl -H`) and `curl -u`, passwords in URLs and **connection strings**, literal passwords assigned in code, **JSON** `"password": "..."` values, **unquoted** YAML / properties / shell / Dockerfile values, secrets typed into **Gherkin steps**, committed `.env` secrets and SAP recordings. Placeholders (`${VAR}`, `<token>`, `{{env:X}}`, `changeme`, `true`, `null`, ...) are skipped by an *anchored* test: a real secret that merely starts with `true...` or `null...` is still found. It never prints a secret - every occurrence in a line is masked, whichever rule found it. Every tracked file is scanned even under `node_modules/` or `logs/` (a committed secret is in the history); only *untracked* files in generated directories are left out, and the summary counts what was not scanned (generated, binary, over 1 MB, unreadable). Intentional exceptions go in `.secretscan-allow.json`, with a reason.
+
+## Run report and test gates
+
+`npx automation-run-report --input test-results/results.json --out report.md` summarises a run (failures, flaky tests, slowest tests, repeat offenders across `--history`) and gates it: `--min-executed N` (default 1: an empty or all-skipped run is not a pass; `0` allows it), `--fail-on-flaky N`, and it always fails when the report carries top-level errors (a failed global setup). A corrupt history line is skipped and counted; numeric options are validated and an unknown option is an error, so a typo cannot switch a gate off. Exit codes: 0 ok, 1 a gate failed, 2 unreadable report or bad command line.
 
 ## Environments
 
@@ -228,6 +238,8 @@ console.log(files.map((f) => f.name));
 await sftp.delete('/incoming/old-report.csv');
 await sftp.close();
 ```
+
+**Host key.** Pin the server's key so a man in the middle cannot collect the password: `connect({ ..., hostFingerprint: 'SHA256:...' })` (the form `ssh-keygen -lf` prints; 64 hex characters also work) or a `hostVerifier(hostKey: Buffer) => boolean` of your own - the connection is refused before credentials are sent. Without either, `connect` logs a warning that the host is not verified. `rmdir()` removes empty directories only; `rmdir(dir, true)` deletes recursively, on purpose. `healthCheck()` is false once the server or network drops the connection, and a second `connect()` ends the first connection instead of leaking it.
 
 `SftpClient` deliberately isn't a wrapper around the real `winscp.com` executable - that would only work on a machine with WinSCP already installed (fine for a Windows RDP box, but not for macOS/Linux dev machines or a GitLab CI Linux runner). It's a pure Node.js SFTP implementation instead, so the same test runs identically everywhere this framework runs. `tests/support/sftpTestServer.ts` and `tests/support/smtpTestServer.ts` are real, minimal, in-process SFTP/SMTP servers - not stubs - used to test both clients against actual protocol traffic; see `tests/sftpClient.spec.ts` / `tests/smtpClient.spec.ts` for the full working examples.
 

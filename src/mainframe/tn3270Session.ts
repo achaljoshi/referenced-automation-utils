@@ -11,7 +11,7 @@ export interface Tn3270Target {
 }
 
 export interface Tn3270SessionOptions {
-  /** How long to wait for the host (keyboard unlock, expected text). Default 30 000 ms (SAP-style: TN3270_TIMEOUT_MS). */
+  /** How long to wait for the host (keyboard unlock, expected text). Default: $TN3270_TIMEOUT_MS, else 30 000 ms. */
   timeoutMs?: number;
   /** How often to look while waiting for text. Default 200 ms. */
   pollMs?: number;
@@ -26,6 +26,17 @@ export interface ScreenMatch {
 }
 
 const log = getLogger('tn3270');
+
+/** Room the emulator gets, beyond a `Wait(...)`, to answer before the transport gives up on it - so the session's own, friendlier timeout error (with the screen) is the one that fires. */
+const TRANSPORT_MARGIN_MS = 10_000;
+
+function defaultTimeoutMs(): number {
+  const raw = process.env.TN3270_TIMEOUT_MS;
+  if (raw === undefined || raw.trim() === '') return 30_000;
+  if (!/^\d+$/.test(raw.trim()) || Number(raw) < 1)
+    throw new Error(`TN3270_TIMEOUT_MS "${raw}" is not a whole number of milliseconds >= 1`);
+  return Number(raw);
+}
 
 /**
  * A 3270 terminal session driven by scripting commands, with the waiting a hand-written script usually forgets:
@@ -50,7 +61,7 @@ export class Tn3270Session implements Adapter {
     private readonly transport: Tn3270Transport,
     options: Tn3270SessionOptions,
   ) {
-    this.timeoutMs = options.timeoutMs ?? 30_000;
+    this.timeoutMs = options.timeoutMs ?? defaultTimeoutMs();
     this.pollMs = options.pollMs ?? 200;
   }
 
@@ -74,8 +85,8 @@ export class Tn3270Session implements Adapter {
     return session;
   }
 
-  private async send(command: string): Promise<Tn3270Reply> {
-    const reply = await this.transport.request(command);
+  private async send(command: string, options?: { timeoutMs?: number }): Promise<Tn3270Reply> {
+    const reply = await this.transport.request(command, options);
     this.lastStatus = reply.status;
     return reply;
   }
@@ -84,14 +95,20 @@ export class Tn3270Session implements Adapter {
 
   /** Waits until the host has answered (keyboard unlocked). Fails, saying so, if it has not within the timeout. */
   async waitForUnlock(timeoutMs = this.timeoutMs): Promise<void> {
+    await this.unlock(
+      timeoutMs,
+      'waitForUnlock',
+      `the keyboard is still locked after ${timeoutMs}ms - the host is not answering`,
+    );
+  }
+
+  private async unlock(timeoutMs: number, operation: string, timeoutMessage: string): Promise<void> {
+    const seconds = Math.max(1, Math.ceil(timeoutMs / 1000)); // s3270's Wait takes whole seconds
     try {
-      await this.send(`Wait(${Math.max(1, Math.ceil(timeoutMs / 1000))},Unlock)`);
+      await this.send(`Wait(${seconds},Unlock)`, { timeoutMs: seconds * 1000 + TRANSPORT_MARGIN_MS });
     } catch (error) {
       if (error instanceof Tn3270Error && /timed out/i.test(error.message)) {
-        throw await this.failure(
-          'waitForUnlock',
-          `the keyboard is still locked after ${timeoutMs}ms - the host is not answering`,
-        );
+        throw await this.failure(operation, timeoutMessage);
       }
       throw error;
     }
@@ -100,6 +117,18 @@ export class Tn3270Session implements Adapter {
   /** The screen's rows, after waiting for the host - never the previous screen. */
   async screen(): Promise<string[]> {
     await this.waitForUnlock();
+    return this.peekScreen();
+  }
+
+  /**
+   * The screen once the host has answered, waiting no longer than until `deadline` - one overall deadline for a whole
+   * wait loop, instead of a fresh full timeout per iteration (a locked keyboard made `{ timeout: 5000 }` take 30 s+).
+   * Past the deadline it just reads the screen, so the caller can fail with it.
+   */
+  private async screenBefore(deadline: number, operation: string, what: string): Promise<string[]> {
+    const remaining = deadline - Date.now();
+    if (remaining > 0)
+      await this.unlock(remaining, operation, `${what} - the keyboard stayed locked: the host is not answering`);
     return this.peekScreen();
   }
 
@@ -132,7 +161,11 @@ export class Tn3270Session implements Adapter {
     return this.step('waitForText', { pattern: String(pattern) }, async () => {
       const deadline = Date.now() + timeout;
       for (;;) {
-        const found = findIn(await this.screen(), pattern, options.ignoreCase ?? false);
+        const found = findIn(
+          await this.screenBefore(deadline, 'waitForText', `${String(pattern)} did not appear within ${timeout}ms`),
+          pattern,
+          options.ignoreCase ?? false,
+        );
         if (found) return found;
         if (Date.now() >= deadline)
           throw await this.failure(
@@ -152,7 +185,13 @@ export class Tn3270Session implements Adapter {
     const timeout = options.timeout ?? this.timeoutMs;
     await this.step('waitForNoText', { pattern: String(pattern) }, async () => {
       const deadline = Date.now() + timeout;
-      while (findIn(await this.screen(), pattern, options.ignoreCase ?? false)) {
+      while (
+        findIn(
+          await this.screenBefore(deadline, 'waitForNoText', `${String(pattern)} was still on the screen after ${timeout}ms`),
+          pattern,
+          options.ignoreCase ?? false,
+        )
+      ) {
         if (Date.now() >= deadline)
           throw await this.failure(
             'waitForNoText',

@@ -1,4 +1,10 @@
 import dayjs, { type Dayjs } from 'dayjs';
+import customParseFormat from 'dayjs/plugin/customParseFormat';
+
+// Without this plugin dayjs(text, pattern) silently ignores `pattern` and falls back to Date parsing, so
+// parseDate('25/12/2026', 'DD/MM/YYYY') was Invalid Date and '03/04/2026' became 3 March - unless some other module
+// (exceljs) happened to have loaded the plugin first. Registering it here makes the module correct on its own.
+dayjs.extend(customParseFormat);
 
 export const DEFAULT_DATE_PATTERN = 'YYYY-MM-DD';
 export const DEFAULT_DATETIME_PATTERN = 'YYYY-MM-DD HH:mm:ss';
