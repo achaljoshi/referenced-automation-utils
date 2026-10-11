@@ -22,6 +22,9 @@ logs/
 # Secrets files the SAP layer's providers use (DPAPI-protected, per user and machine) - never commit
 .secrets/
 
+# The RDP drive mailbox (requests, responses, agent files - SQL, headers and tokens pass through it while a request is in flight)
+.remote-mailbox/
+
 # OS / editor
 .DS_Store
 Thumbs.db

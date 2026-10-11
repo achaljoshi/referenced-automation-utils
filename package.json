@@ -13,7 +13,8 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "agent"
   ],
   "engines": {
     "node": ">=18"
@@ -86,6 +87,7 @@
     "automation-audit-gate": "./dist/cli/auditGate.js",
     "automation-scan-secrets": "./dist/cli/scanSecrets.js",
     "automation-run-report": "./dist/cli/runReport.js",
-    "automation-framework-audit": "./dist/cli/frameworkAudit.js"
+    "automation-framework-audit": "./dist/cli/frameworkAudit.js",
+    "automation-remote": "./dist/cli/remote.js"
   }
 }

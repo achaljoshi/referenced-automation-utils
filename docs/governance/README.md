@@ -12,7 +12,7 @@
 
 - **Owners.** Each repo needs named owners (CODEOWNERS) and the dependency-audit exceptions need an owner each (`audit-allowlist.json` currently says `UNASSIGNED`).
 - **Licence.** Every `package.json` says `UNLICENSED`. If the code is to be shared beyond the organisation a licence must be chosen; for internal use, `UNLICENSED` plus the organisation's own notice may be right.
-- **ADR approval.** ADRs 0001-0011 are recorded (0001-0009 retrospectively, 0010 and 0011 together with the change they describe); an approver should confirm each (the `Approved by` line).
+- **ADR approval.** ADRs 0001-0012 are recorded (0001-0009 retrospectively, 0010-0012 together with the change they describe); an approver should confirm each (the `Approved by` line).
 - **The package registry's access.** Installing by version from the registry is the flow now ([ADR 0010](../adr/0010-packages-installed-by-version-from-the-registry.md), `RELEASING.md`). What is still the platform team's to settle is the registry address (`NPM_REGISTRY_URL`), publish permission and how npm is authenticated against it; publishing itself is still a manual step.
 
 ## What is enforced automatically, and where

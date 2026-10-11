@@ -17,3 +17,4 @@ One short file per decision that shapes the whole framework family: what was dec
 | [0009](0009-security-gates.md) | Security gates in CI: dependency audit with expiring exceptions, and secret scanning |
 | [0010](0010-packages-installed-by-version-from-the-registry.md) | Shared packages are installed by version from the npm registry; local tarballs are the fallback |
 | [0011](0011-fortnightly-manual-framework-audit.md) | A fortnightly, manually triggered framework audit: automated checks plus a judgement review |
+| [0012](0012-remote-host-over-rdp-drive-mailbox.md) | Steps on a remote desktop host go through an "RDP drive mailbox": files over one redirected drive, a PowerShell agent in the RDP session (not verified on a real Windows host) |

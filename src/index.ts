@@ -25,3 +25,4 @@ export type { CreatePlaywrightConfigOptions } from './playwright/config';
 export * as mainframe from './mainframe';
 export * as governance from './governance';
 export * as placeholders from './placeholders';
+export * as remote from './remote';

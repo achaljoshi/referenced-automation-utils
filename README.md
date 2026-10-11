@@ -27,6 +27,7 @@ npm test                # runs this package's own unit tests
 | `testing` | In-process SMTP, IMAP and SFTP servers for tests (`testing.startSmtpTestServer()`, `testing.startImapTestServer()`, `testing.startSftpTestServer()`), shared by every repo instead of copied into each. |
 | `placeholders` (`ScenarioVariables`, `randomValue`, `relativeDate`) | `{{name}}`, `{{env:X\|fallback}}`, `{{uuid}}`, `{{random:email}}`, `{{date:+7d}}` placeholders for unique/fresh/env-driven test data; fails loudly when one cannot be resolved; `{{env:X}}` refuses the credentials a CI system injects (`CI_JOB_TOKEN`, `CI_REGISTRY_PASSWORD`, `CI_JOB_JWT*`, ...) and `{{random:email}}` only uses reserved example domains. See [Placeholders](#placeholders-for-test-data). |
 | `playwright/config` (`createPlaywrightConfig`) | One Playwright config for the whole family: `BROWSER`/`DEVICE`/timeouts/reporters from `.env.<name>`, optional log-in-once `auth` project. Each repo's `playwright.config.ts` is now ~5 lines. See [Shared Playwright config](#shared-playwright-config). |
+| `remote` (`RemoteHost`, `RemoteDbClient`, `getRemoteHost`) | Runs DB / HTTP / SAP-bridge / other steps on a remote Windows desktop host that the test machine (for example an AWS WorkSpace) can reach only by Remote Desktop: requests travel as files over one redirected drive to a PowerShell agent in the RDP session. **Not verified on a real Windows host.** See [Running steps on a remote desktop](#running-steps-on-a-remote-desktop). |
 | `crypto` | md5/sha1/sha256/sha512, hmac, base64, and `mask()` for logging sensitive values safely. |
 | `dateUtils` | Thin `dayjs`-based helpers: format/parse, add days/months/hours/minutes, diff, compare, epoch conversion. |
 | `randomUtils` | `@faker-js/faker`-backed test data: names, emails, addresses, UUIDs, bounded random numbers, past/future dates, credit card numbers. |
@@ -93,6 +94,18 @@ Why it is built this way: a 3270 host answers asynchronously and the screen **ke
 `mainframe.createSampleMainframe()` is an in-memory host (logon, menu, account inquiry; the keyboard locks after Enter and the old screen is shown until the host "answers"), so scripts can be tried and the session logic tested with no mainframe. It proves the session logic, **not** that a script matches your host.
 
 **Verified here** (no mainframe and no `s3270` on the build machine): the session logic against the simulator, including a negative control that shows a read straight after Enter returns the *previous* screen; and the `s3270` line protocol (a command per line in; `data:` lines, a status line and `ok`/`error` out) against a stand-in process that speaks it - sequential commands, error replies, timeouts, a crashed emulator. **Not verified:** a real `s3270` and a real host. The command syntax (`Connect(L:host:port)`, `Wait(seconds,Unlock)`, `MoveCursor(row,col)` 0-based, `Ascii`) and the 12-field status line were written from the x3270 scripting documentation and have not been run against the real program - install `s3270`, point `S3270_PATH` at it and try the logon above first. Batch/JES submission is not covered (use the SFTP/FTP client for file-based job interfaces).
+
+## Running steps on a remote desktop
+
+When the database, the APIs and SAP GUI are reachable only from a remote Windows desktop host (no internet there, only Remote Desktop on port 3389 open), `remote` runs those steps *on* that host while the UI steps stay on the test machine (for example an AWS WorkSpace). Put the RDP login in `.env.<env>.local`, set `REMOTE_ENABLED=true`, and:
+
+```ts
+const host = await remote.getRemoteHost();   // undefined unless REMOTE_ENABLED=true - use the local services then
+const { rows } = await host!.dbQuery('SELECT TOP 1 * FROM orders WHERE id = @p0', [42]);
+const reply = await host!.http({ method: 'GET', url: 'https://internal-api/health' });
+```
+
+`automation-remote doctor` checks the local prerequisites and `automation-remote check` walks the chain stage by stage. The `api` and `sap` packages will use it in follow-up work in their own repos. **The Windows side (RDP launcher, PowerShell agent) has never run on a real Windows host** - what is and is not verified, the setup per start mode, the settings, the security trade-offs and troubleshooting are in [docs/REMOTE_DESKTOP.md](docs/REMOTE_DESKTOP.md) and [ADR 0012](docs/adr/0012-remote-host-over-rdp-drive-mailbox.md).
 
 ## Test servers
 
@@ -322,7 +335,9 @@ referenced-automation-utils/
 │   ├── validation/{objectPath,schemaValidator}.ts
 │   ├── db/{dbClient,sqliteClient}.ts
 │   ├── email/emailUtils.ts
+│   ├── remote/              # steps on a remote desktop host over RDP (docs/REMOTE_DESKTOP.md)
 │   └── index.ts             # barrel export - this is what `import ... from '@automation/referenced-automation-utils'` resolves to
+├── agent/                  # SHIPPED: remote-agent.ps1 + start.cmd, copied into the RDP mailbox
 ├── tests/                  # this package's own unit tests, NOT shipped
 ├── scripts/{setup,create-package,publish-package}.{sh,bat}
 ├── .env.example, .env.qa, .env.stage, .env.dev

@@ -186,7 +186,7 @@ test.describe('S3270Transport over a real process speaking the s3270 line protoc
 
   test('after a timeout the emulator is stopped and the transport is finished: a LATE reply can never answer the next request', async () => {
     const transport = start({ S3270_SLOW: 'Home:500' }, { requestTimeoutMs: 150 });
-    await transport.request('Connect(h:23)');
+    await transport.request('Connect(h:23)', { timeoutMs: 10_000 });
     const timedOut = (await transport.request('Home').catch((e: unknown) => e)) as mainframe.Tn3270Error;
     expect(timedOut.code).toBe('TIMEOUT');
     // the old transport kept going: Home's late "ok" (at 500 ms) was delivered as the answer to this Ascii
@@ -203,7 +203,7 @@ test.describe('S3270Transport over a real process speaking the s3270 line protoc
 
   test('queued commands fail with the reason when an earlier one times out', async () => {
     const transport = start({ S3270_HANG: 'Home' }, { requestTimeoutMs: 150 });
-    await transport.request('Connect(h:23)');
+    await transport.request('Connect(h:23)', { timeoutMs: 10_000 });
     const results = await Promise.all([transport.request('Home'), transport.request('Ascii'), transport.request('Tab')].map((p) => p.catch((e: unknown) => e as mainframe.Tn3270Error)));
     expect(results.map((r) => (r as mainframe.Tn3270Error).code)).toEqual(['TIMEOUT', 'EXITED', 'EXITED']);
   });
