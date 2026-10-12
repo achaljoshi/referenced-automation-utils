@@ -21,7 +21,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "clean": "rimraf dist *.tgz",
+    "clean": "rimraf --glob dist \"*.tgz\"",
     "lint": "eslint . --ext .ts --max-warnings 0",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "format": "prettier --write .",
