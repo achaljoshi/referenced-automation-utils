@@ -30,7 +30,12 @@
     "prepack": "npm run build",
     "security": "node dist/cli/auditGate.js --allow-unassigned && node dist/cli/scanSecrets.js",
     "audit": "node dist/cli/frameworkAudit.js --run",
-    "audit:quick": "node dist/cli/frameworkAudit.js"
+    "audit:quick": "node dist/cli/frameworkAudit.js",
+    "remote": "node dist/cli/remote.js",
+    "run-report": "node dist/cli/runReport.js",
+    "scan-secrets": "node dist/cli/scanSecrets.js",
+    "audit-gate": "node dist/cli/auditGate.js",
+    "framework-audit": "node dist/cli/frameworkAudit.js"
   },
   "dependencies": {
     "@faker-js/faker": "^9.9.0",

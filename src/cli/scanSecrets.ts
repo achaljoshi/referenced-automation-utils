@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import * as path from 'node:path';
 import { loadAllow, RULES, scanDirectory } from '../governance/secretScan';
-import { parseFlags, runCli } from './args';
+import { howToRun, parseFlags, runCli } from './args';
 
 const USAGE = `automation-scan-secrets - fail the build if a secret is about to be committed
 
@@ -17,7 +17,7 @@ skipped (generated directories, binary, over 1 MB, unreadable). Exit 1 if anythi
 An intentional exception goes in .secretscan-allow.json, with a reason a reviewer can judge:
   { "allow": [ { "rule": "env-secret", "path": ".env.simulator", "reason": "the simulator's made-up credentials" } ] }
 Rules: ${[...new Set(RULES.map((r) => r.id))].join(', ')}
-`;
+${howToRun('automation-scan-secrets', 'scan-secrets', 'scanSecrets')}`;
 
 function main(): void {
   const flags = parseFlags(process.argv.slice(2).filter((a) => a !== '-h'), {

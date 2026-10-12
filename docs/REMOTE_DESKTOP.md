@@ -74,7 +74,7 @@ flowchart LR
 - **The RDP link is nested**: it runs inside the WorkSpace's own session, from the WorkSpace to the RDP host. So the policies that matter are the **RDP host's** - drive redirection must be allowed there (GPO "Do not allow drive redirection" must not apply) and its `alternate shell` handling must work - not your laptop's. The redirected folder lives on the **WorkSpace's disk** (`REMOTE_SHARE_DIR`), not on your laptop. Whatever policy the WorkSpace itself has about running `mstsc` or `subst` applies as well.
 - A login on the RDP host that may use Remote Desktop, and a session that stays unlocked and connected (SAP GUI scripting only sees an interactive desktop; a locked or disconnected session breaks it). Minimising the RDP window is fine; closing it is not.
 
-`automation-remote doctor` reports whether the current process looks like it runs in an interactive Windows session (it checks `SESSIONNAME`) and **warns** - it does not fail - when it does not.
+`automation-remote doctor` (see [Command line](#command-line) for how to start it; inside this repo it is `npm run remote -- doctor`) reports whether the current process looks like it runs in an interactive Windows session (it checks `SESSIONNAME`) and **warns** - it does not fail - when it does not.
 
 ## One-time setup, per start mode
 
@@ -106,7 +106,7 @@ In `startup` and `manual` mode `connect()` prints what to do (a clear log line) 
 
 ## Settings (`.env.<env>`; secrets only in `.env.<env>.local`)
 
-Everything is read with the strict `ConfigReader` getters, so a typo is an error, not a silent default. Copy the keys from `.env.example`. **`REMOTE_RDP_PASSWORD` and `REMOTE_DB_CONNECTION_STRING` are secrets: put them in `.env.<env>.local` (git-ignored) or the CI secret store - never in a committed file.** `RemoteConfig` masks them in `JSON.stringify`, `util.inspect` and spreads; no error message or log line contains them.
+Everything is read with the strict `ConfigReader` getters, so a typo is an error, not a silent default. Copy the keys from [`.env.example`](../.env.example), which documents every key (valid values, default, required, secret, an example); [`.env.local.example`](../.env.local.example) is the template for the secret file. The secret file is named after the environment: `.env.qa.local` for `ENV=qa` (a file called `.env.local` is never read). Wrap a value that contains `#`, `$`, quotes or spaces in double quotes; leave a Windows `DOMAIN\user` unquoted or in single quotes. **`REMOTE_RDP_PASSWORD` and `REMOTE_DB_CONNECTION_STRING` are secrets: put them in `.env.<env>.local` (git-ignored) or the CI secret store - never in a committed file.** `RemoteConfig` masks them in `JSON.stringify`, `util.inspect` and spreads; no error message or log line contains them.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -163,7 +163,14 @@ test.afterAll(() => remote.closeRemoteHost());
 
 ### Command line
 
-| Command | What it does |
+The commands below are the `automation-remote` tool. How you start it depends on where you are, because a package's own `bin` commands are not linked into its own `node_modules/.bin`:
+
+- **In a project that depends on `@automation/referenced-automation-utils`** (`api`, `ui`, `ui-api`, `sap`, or your own): `npx automation-remote doctor`.
+- **Inside the `referenced-automation-utils` repo** (after `npm run build`): `npm run remote -- doctor`, or `node dist/cli/remote.js doctor`. `npx automation-remote ...` fails here on Windows with `'automation-remote' is not recognized as an internal or external command`.
+
+In PowerShell, set the values for one run with `$env:REMOTE_ENABLED = "true"` (undo: `Remove-Item Env:REMOTE_ENABLED`); the `REMOTE_*` keys also work from `.env.<env>` and `.env.<env>.local`.
+
+| Command (`automation-remote <command>`) | What it does |
 |---|---|
 | `automation-remote doctor` | Local prerequisites: valid configuration (secrets masked), Windows, `mstsc` / `cmdkey` / `subst`, interactive session (a warning only), bundled agent files, writable mailbox. |
 | `automation-remote check [--url <http url>] [--db] [--exec]` | Connects, then PASS/FAIL per stage with a hint: mailbox, agent, ping, interactive desktop, optional HTTP GET from the host, optional `SELECT 1`, optional `hostname`. |

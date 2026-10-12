@@ -10,7 +10,7 @@ import {
   parseAudit,
   type Severity,
 } from '../governance/auditGate';
-import { parseFlags, runCli } from './args';
+import { howToRun, parseFlags, runCli } from './args';
 
 const USAGE = `automation-audit-gate - fail the build on dependency vulnerabilities, with exceptions that are explicit, owned and expiring
 
@@ -32,7 +32,7 @@ Every entry needs id, package, reason, a real owner and an expiry no more than -
 An entry stops protecting you on its expiry date, so the risk has to be re-decided on purpose. --strict-allowlist also
 fails on entries that match nothing any more. --allow-unassigned accepts entries whose owner is empty or UNASSIGNED
 (a stop-gap while an owner is being named).
-`;
+${howToRun('automation-audit-gate', 'audit-gate', 'auditGate')}`;
 
 const LEVELS: Severity[] = ['info', 'low', 'moderate', 'high', 'critical'];
 

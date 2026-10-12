@@ -9,7 +9,7 @@ import {
   toHistoryRecord,
   type PlaywrightJsonReport,
 } from '../governance/runReport';
-import { parseFlags, runCli, UsageError } from './args';
+import { howToRun, parseFlags, runCli, UsageError } from './args';
 
 const USAGE = `automation-run-report - what a test run did: failures, flaky tests, slowest tests, repeat offenders
 
@@ -29,7 +29,7 @@ Gates (the report is written first, whatever they say):
 
 Exit codes: 0 ok, 1 a gate failed, 2 the report could not be read or the command line is wrong. Numbers must be whole;
 an unknown option is an error, so a typo cannot switch a gate off.
-`;
+${howToRun('automation-run-report', 'run-report', 'runReport')}`;
 
 function main(): void {
   const flags = parseFlags(process.argv.slice(2).filter((a) => a !== '-h'), {

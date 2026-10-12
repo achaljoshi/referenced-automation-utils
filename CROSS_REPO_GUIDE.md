@@ -116,9 +116,16 @@ git clone <url>/referenced-automation-ui-api.git
 Then, in each repo you use:
 
 ```bash
-export NPM_REGISTRY_URL="<your registry URL>"     # Windows cmd: set NPM_REGISTRY_URL=<your registry URL>
-./scripts/setup.sh                                 # Windows: scripts\setup.bat
+export NPM_REGISTRY_URL="<your registry URL>"
+./scripts/setup.sh
 ```
+
+```powershell
+$env:NPM_REGISTRY_URL = "<your registry URL>"      # PowerShell (cmd.exe: set NPM_REGISTRY_URL=<your registry URL>)
+.\scripts\setup.bat                                # PowerShell needs the .\ ; plain scripts\setup.bat works only in cmd.exe
+```
+
+On Windows, each repo's README has a "Windows first run" section with the errors a fresh checkout usually hits (`'tsc' is not recognized`, `Cannot find module ...dist...`, `No tests found`, ...) and their fixes.
 
 What each `setup.sh` does - the first step is always the registry:
 
@@ -174,8 +181,8 @@ owns the package (`utils`, `api`, `ui` or `sap`):
    ```
 4. **Publish** (a dry run first):
    ```bash
-   export NPM_REGISTRY_URL="<your registry URL>"
-   ./scripts/publish-package.sh --dry-run       # Windows: scripts\publish-package.bat --dry-run
+   export NPM_REGISTRY_URL="<your registry URL>"      # PowerShell: $env:NPM_REGISTRY_URL = "<your registry URL>"
+   ./scripts/publish-package.sh --dry-run       # PowerShell: .\scripts\publish-package.bat --dry-run
    ./scripts/publish-package.sh
    ```
    `publish-package` sets the registry, builds with `create-package.sh`
@@ -222,6 +229,11 @@ and runs `npm install --no-save` on them.
 npm install --no-save ../shared-packages/automation-referenced-automation-utils-<version>.tgz
 ```
 
+```powershell
+cd ..\referenced-automation-utils; .\scripts\create-package.bat --local; cd ..\referenced-automation-api     # one per needed package
+npm install --no-save ..\shared-packages\automation-referenced-automation-utils-<version>.tgz
+```
+
 List **all** the `@automation/*` tarballs the repo needs in the one command.
 `--no-save` keeps `package.json` and the lockfile unchanged; run the command
 again after every `npm ci` (which removes what the lockfile does not list) and
@@ -236,7 +248,7 @@ A walkthrough to prove the whole chain works from the registry, with no local ta
 
 1. **Set the registry** (every terminal; the URL is your Artifactory npm registry, the `NPM_REGISTRY_URL` CI/CD variable):
    ```bash
-   export NPM_REGISTRY_URL="<your registry URL>"
+   export NPM_REGISTRY_URL="<your registry URL>"          # PowerShell: $env:NPM_REGISTRY_URL = "<your registry URL>"
    ```
    Authenticate npm against it with your organisation's own procedure (not covered here; the scripts never log in).
 2. **Publish in dependency order.** The first publish of each package uses its current version (1.0.0) as it is - bump the version only for later releases. In `referenced-automation-utils`:
@@ -339,8 +351,8 @@ const env3 = loadEnv({ dir: __dirname });   // load .env.<name> files from a spe
 |---|---|
 | `get(key, defaultValue?)` | Returns the string value, or `defaultValue`. Throws if missing and no default given. |
 | `getOptional(key, defaultValue?)` | Same, but returns `undefined` instead of throwing when absent. |
-| `getInt(key, defaultValue?)` | Parses as an integer. Throws on a non-numeric value, or if missing with no default. |
-| `getBoolean(key, defaultValue = false)` | `'true'` (case-insensitive, trimmed) → `true`; anything else → the default. |
+| `getInt(key, defaultValue?)` | Parses a whole number. Throws on anything else (`12ab`, `1.5`), or if missing with no default. |
+| `getBoolean(key, defaultValue = false)` | `true/false`, `1/0`, `yes/no`, `on/off` (case-insensitive, trimmed) → the boolean; missing → the default; anything else throws. |
 | `getList(key, defaultValue = [])` | Comma-separated string → trimmed array, e.g. `FEATURE_FLAGS=a,b,c` → `['a','b','c']`. |
 | `has(key)` | `true`/`false`. |
 | `envName` (getter) | The resolved environment name (`get('ENV', 'qa')`). |
@@ -351,26 +363,38 @@ const env3 = loadEnv({ dir: __dirname });   // load .env.<name> files from a spe
 
 **Value load order (later wins):** `.env` → `.env.<name>` →
 `.env.<name>.local` → real `process.env` (CI secrets, or
-`FOO=bar npx playwright test` on the command line, always win over any file).
+`FOO=bar npx playwright test` in bash / `$env:FOO = "bar"; npx playwright test` in PowerShell, always win over any file).
+A variable that code reads straight from `process.env` (the logger's `LOG_LEVEL`, `RANDOM_SEED`, `CI`, `TZ`, ...) is **not** affected by these files at all.
+`.env.example` in every repo is the complete reference: for each variable what it is for, where it is read from, valid values, default,
+whether it is required and whether it is a secret.
 
 ### What to actually set up locally
 
 Every repo ships:
-- **`.env.example`** - a committed template, safe to read, no secrets. Copy
-  patterns from it, don't rely on it being loaded at runtime (it isn't -
-  `loadEnv()` never reads a file literally named `.env.example`).
+- **`.env.example`** - a committed reference of every variable the repo reads
+  (what it is for, where it is read from, valid values, default, required,
+  secret, an example), safe to read, no secrets. Copy lines from it, don't
+  rely on it being loaded at runtime (it isn't - `loadEnv()` never reads a
+  file literally named `.env.example`). A `tests/envDocs.spec.ts` in each repo
+  fails when the code and the file drift apart.
+- **`.env.local.example`** - the template for the secret file below.
 - **`.env.dev` / `.env.qa` / `.env.stage`** - real, committed, non-secret
   per-environment values (URLs, log level, feature toggles). These *are*
   loaded automatically by `ENV=<name>`.
-- **`.env.<name>.local`** (you create this, gitignored) - real credentials/
-  secrets for whichever environment you're pointed at locally. Never commit
-  this file.
+- **`.env.<name>.local`** (you create this, gitignored; copy `.env.local.example`) - real credentials/
+  secrets for whichever environment you're pointed at locally. It is named
+  after the environment (`.env.qa.local` for `ENV=qa`); a file called just
+  `.env.local` is never read. Never commit this file.
 
 Run against a specific environment with:
 
 ```bash
 ENV=qa npx playwright test
 ENV=stage npx playwright test
+```
+
+```powershell
+$env:ENV = "stage"; npx playwright test      # PowerShell; undo with Remove-Item Env:ENV
 ```
 
 ### Env vars per repo
@@ -479,7 +503,7 @@ import {
 } from '@automation/referenced-automation-api';
 ```
 
-The API package also ships `api-curl-to-playwright` (curl commands -> tests; `npx api-curl-to-playwright curl/ --out tests/generated`).
+The API package also ships `api-curl-to-playwright` (curl commands -> tests). From a project that depends on the API package: `npx api-curl-to-playwright curl/ --out tests/generated`; inside the `api` repo itself (its own bin is not linked into its own `node_modules/.bin`): `npm run curl-to-tests -- curl/ --out tests/generated`.
 Every converter (`api-curl-to-playwright`, `ui-codegen-to-playwright`, `sap-vbs-to-playwright`) writes tests that start with the same two kinds of object, which the steps only refer to: `CONSTANTS` (everything typed, sent or expected; secrets as getters that read the environment) and the locators (`LOCATORS` for UI and SAP, `ENDPOINTS` for API). Change an input or fix a locator once, at the top; `--inline` opts out.
 Retries, polling, idempotency keys, downloads, GraphQL/SOAP and the exchange log are on `ApiClient`; see its `docs/PLAYWRIGHT_COVERAGE.md`.
 
@@ -494,7 +518,7 @@ import { step, test, guardedTest, expect, actions, locators, assertions,
 ```
 
 The UI package also ships `ui-codegen-to-playwright` (a `playwright codegen` recording -> a test in this style; `--page-objects`,
-`--data`). Beyond `actions` it covers dialogs, network mocking/HAR/WebSocket, storage and a second signed-in user, emulation,
+`--data`; `npx ui-codegen-to-playwright ...` from a project that depends on the UI package, `npm run codegen-to-tests -- ...` inside the `ui` repo itself). Beyond `actions` it covers dialogs, network mocking/HAR/WebSocket, storage and a second signed-in user, emulation,
 clock, tabs, evaluate, ARIA/visual snapshots, performance budgets and a page guard; `docs/PLAYWRIGHT_COVERAGE.md` maps each
 to Playwright's documentation.
 

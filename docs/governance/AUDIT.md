@@ -19,13 +19,13 @@ npm run audit:quick      # automated checks only (seconds; does not run the gate
 **All five repos at once, with the checks that compare repos** (Playwright / playwright-bdd versions, duplicated tests). From `referenced-automation-utils`, with the repos checked out next to each other:
 
 ```bash
-./scripts/audit-family.sh            # Windows: scripts\audit-family.bat
-./scripts/audit-family.sh --run      # also run every repo's gates (slow)
+./scripts/audit-family.sh            # PowerShell: .\scripts\audit-family.bat
+./scripts/audit-family.sh --run      # also run every repo's gates (slow)    (PowerShell: .\scripts\audit-family.bat --run)
 ```
 
 **In GitLab** (any repo's pipeline: press play on the manual `audit` job): the automated checks, with `AUDIT_REPORT.md` and `audit.json` kept as job artifacts for 90 days. Add the variable `AUDIT_RUN_GATES=1` when starting the pipeline to run the repo's gates inside the job as well (slow; the pipeline's own jobs already run them).
 
-Options of the command (`npx automation-framework-audit --help`): `--repo <dir>` (repeatable), `--family <dir>`, `--out <dir>` (default `audit-reports`), `--run`, `--fail-on critical|high|medium|low` (exit 1 at or above that severity; default: never fail, because the run is manual).
+Options of the command (`npm run framework-audit -- --help` inside `referenced-automation-utils`; `npx automation-framework-audit --help` in any repo that depends on utils - a package's own `bin` is not linked into its own `node_modules/.bin`, so `npx` fails in utils itself on Windows with "is not recognized"; `node dist/cli/frameworkAudit.js --help` works after `npm run build`): `--repo <dir>` (repeatable), `--family <dir>`, `--out <dir>` (default `audit-reports`), `--run`, `--fail-on critical|high|medium|low` (exit 1 at or above that severity; default: never fail, because the run is manual).
 
 ## What you get
 

@@ -33,7 +33,7 @@ test.describe('remote desktop documentation matches the code', () => {
     const docs = read('docs/REMOTE_DESKTOP.md');
     for (const key of ['REMOTE_RDP_PASSWORD', 'REMOTE_DB_CONNECTION_STRING']) {
       expect(docs).toMatch(new RegExp(`\\| \`${key}\` \\|[^\\n]*\\*\\*Secret\\.\\*\\*`));
-      expect(read('.env.example')).toMatch(new RegExp(`${key}=\\s+# SECRET`));
+      expect(read('.env.example')).toMatch(new RegExp(`\\| Secret: YES[^\\n]*\\n# Example[^\\n]*\\n# ${key}=`));
     }
   });
 

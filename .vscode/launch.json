@@ -5,8 +5,8 @@
       "type": "node",
       "request": "launch",
       "name": "Debug current test file",
-      "program": "${workspaceFolder}/node_modules/.bin/playwright",
-      "args": ["test", "${relativeFile}", "--headed"],
+      "program": "${workspaceFolder}/node_modules/@playwright/test/cli.js",
+      "args": ["test", "${fileBasename}", "--headed"],
       "console": "integratedTerminal",
       "skipFiles": ["<node_internals>/**"]
     },
@@ -14,7 +14,7 @@
       "type": "node",
       "request": "launch",
       "name": "Debug all tests",
-      "program": "${workspaceFolder}/node_modules/.bin/playwright",
+      "program": "${workspaceFolder}/node_modules/@playwright/test/cli.js",
       "args": ["test"],
       "console": "integratedTerminal",
       "skipFiles": ["<node_internals>/**"]

@@ -7,7 +7,7 @@ import { LAYOUT, remotePaths } from '../remote/protocol';
 import { checkRdpPrerequisites } from '../remote/rdp';
 import { RemoteHost } from '../remote/remoteHost';
 import { setupHelp } from '../remote/setupHelp';
-import { parseFlags, UsageError } from './args';
+import { howToRun, parseFlags, UsageError } from './args';
 import * as path from 'node:path';
 
 const USAGE = `automation-remote - run DB / API / SAP steps on a remote desktop host over Remote Desktop (RDP drive mailbox)
@@ -27,7 +27,7 @@ NOT VERIFIED on a real Windows host: the RDP launcher and the PowerShell agent h
 
 Exit codes: 0 ok, 1 a check failed (doctor: including an invalid configuration), 2 bad command line, or a bad
 configuration in any other command.
-`;
+${howToRun('automation-remote', 'remote', 'remote')}`;
 
 type Level = 'PASS' | 'FAIL' | 'WARN';
 const out = (text: string) => process.stdout.write(`${text}\n`);

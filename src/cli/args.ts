@@ -54,3 +54,19 @@ export function runCli(usage: string, body: () => void): void {
     throw error;
   }
 }
+
+/**
+ * The "how do I start this" block every usage text ends with. A package's own `bin` commands are not linked into its
+ * own node_modules/.bin, so `npx <bin>` only works in a project that depends on the package; inside this repo the
+ * command is the npm script alias (or node on the built file), which is what Windows users otherwise find out by
+ * "'<bin>' is not recognized as an internal or external command".
+ */
+export function howToRun(bin: string, alias: string, file: string): string {
+  return `
+Running it:
+  from a project that depends on @automation/referenced-automation-utils:
+    npx ${bin} <arguments>
+  inside the referenced-automation-utils repo (run \`npm run build\` first):
+    npm run ${alias} -- <arguments>      or      node dist/cli/${file}.js <arguments>
+`;
+}

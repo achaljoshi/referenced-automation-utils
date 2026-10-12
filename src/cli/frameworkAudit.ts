@@ -13,6 +13,7 @@ import {
   type RepoRef,
   type AuditSeverity,
 } from '../governance/frameworkAudit';
+import { howToRun } from './args';
 
 const USAGE = `automation-framework-audit - the fortnightly framework audit, the automated part
 
@@ -33,7 +34,7 @@ playwright-bdd pinning, CODEOWNERS, accepted-advisory owners and expiry, pipelin
 no typecheck, features never generated, image/doc mismatches), broken doc links and retired procedures, version drift
 and duplicated tests across repos. Exceptions go in .framework-audit.json with a reason; see docs/governance/AUDIT.md.
 It never needs a network. The judgement-based review is the checklist at the end of the report.
-`;
+${howToRun('automation-framework-audit', 'framework-audit', 'frameworkAudit')}`;
 
 function values(flag: string): string[] {
   const out: string[] = [];

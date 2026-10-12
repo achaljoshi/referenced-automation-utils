@@ -29,7 +29,7 @@ git add package.json package-lock.json
 Do not delete the lockfile and do not add `-D` for `@automation/*` packages. Upgrade **down the chain**: `utils` -> `api` / `ui` -> `sap` -> `ui-api`. Upgrading Playwright itself is its own procedure (README of `utils`, "Bumping Playwright").
 
 ## Trying a change before it is published
-Local generation: `./scripts/setup.sh --local` in the consumer (sibling checkouts), or generate the tarballs with `./scripts/create-package.sh --local` and `npm install --no-save <the .tgz files>`. `package.json` and the lockfile stay untouched. See the README, "Using a package without a registry".
+Local generation: `./scripts/setup.sh --local` in the consumer (sibling checkouts; PowerShell: `.\scripts\setup.bat --local`), or generate the tarballs with `./scripts/create-package.sh --local` and `npm install --no-save <the .tgz files>`. `package.json` and the lockfile stay untouched. See the README, "Using a package without a registry".
 
 ## The registry
 The registry address is the `NPM_REGISTRY_URL` variable (never written into these repositories) and publishing needs an npm identity with deploy permission on it. How npm is authenticated against the Artifactory is the platform team's procedure and is deliberately **not** described in this repository; the scripts never log in. When the pipelines publish, it is a manual, protected job owned by the platform team.
