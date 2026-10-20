@@ -39,7 +39,7 @@ Options of the command (`npm run framework-audit -- --help` inside `referenced-a
 | Test quality | `{ force: true }` (`force-action`), `expect(await x.isVisible())` (`assert-not-web-first`), `toThrow()` with no expected error (`assert-weak-throw`), XPath / nth-child locators (`locator-brittle`) |
 | Security | servers listening on all interfaces (`listen-all-interfaces`); the repo's own `security` gate (secret scan + dependency audit) when `--run` is used |
 | Traceability | share of tests and scenarios carrying a requirement id (`traceability`), `@smoke`/`@regression` tags (`tags`) |
-| Dependencies | `file:`/`.tgz` `@automation` dependencies (`dep-local-package`), unpinned `playwright-bdd` (`dep-bdd-not-pinned`), missing lockfile (`dep-no-lockfile`), version drift between repos (`family-version-drift`) |
+| Dependencies | tsconfig options TypeScript 7 removed (`tsconfig-removed-option`), `file:`/`.tgz` `@automation` dependencies (`dep-local-package`), unpinned `playwright-bdd` (`dep-bdd-not-pinned`), missing lockfile (`dep-no-lockfile`), version drift between repos (`family-version-drift`) |
 | Governance | CODEOWNERS (`gov-codeowners`), accepted advisories without owner / expired / expiring (`gov-allowlist-*`), unapproved ADRs (`gov-adr-approval`), licence (`gov-licence`) |
 | Pipeline | no pipeline (`ci-missing`), security job that cannot block (`ci-security-nonblocking`), no typecheck step (`ci-no-typecheck`), features never generated (`ci-bdd-not-generated`), image vs Playwright version (`ci-image-mismatch`), shared template not used (`ci-no-shared-template`) |
 | Docs | broken links and anchors (`doc-broken-link`), retired procedures still described (`doc-stale-phrase`), README image differs from the pipeline's (`doc-image-mismatch`) |

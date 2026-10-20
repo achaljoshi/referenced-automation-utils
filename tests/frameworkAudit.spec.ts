@@ -173,6 +173,17 @@ test.describe('dependencies and governance', () => {
   });
 });
 
+test.describe('tsconfig', () => {
+  test('moduleResolution node / node10 / classic is flagged (TypeScript 7 removed them); node16 is not', () => {
+    const bad = repo({ 'tsconfig.json': '{\n  "compilerOptions": {\n    "module": "commonjs",\n    "moduleResolution": "node"\n  }\n}\n', 'sub/tsconfig.build.json': '{ "compilerOptions": { "moduleResolution": "node10" } }' });
+    const finding = auditRepo(bad.ref, { now }).findings.find((f) => f.rule === 'tsconfig-removed-option');
+    expect(finding?.count).toBe(2);
+    expect(finding?.evidence?.join('\n')).toContain('tsconfig.json:4');
+    const good = repo({ 'tsconfig.json': '{ "compilerOptions": { "module": "node16", "moduleResolution": "node16" } }' });
+    expect(ids(auditRepo(good.ref, { now }))).not.toContain('tsconfig-removed-option');
+  });
+});
+
 test.describe('pipeline rules', () => {
   const pkg = JSON.stringify({ scripts: { typecheck: 'tsc', test: 'bddgen && playwright test' } });
 

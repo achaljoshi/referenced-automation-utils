@@ -541,6 +541,33 @@ interface PackageJson {
   peerDependencies?: Record<string, string>;
 }
 
+/**
+ * TypeScript 7 removed `moduleResolution: "node"` (also written node10) and `classic`: a tsconfig that still sets one
+ * fails with TS5108 in an editor or a machine that has TypeScript 7, whatever the repo's own pinned TypeScript says.
+ */
+function tsconfigFindings(root: string, repo: string): AuditFinding[] {
+  const bad: string[] = [];
+  for (const file of walk(root, (f) => /(^|[\\/])tsconfig[^\\/]*\.json$/.test(f))) {
+    read(file).split('\n').forEach((line, index) => {
+      const m = /"moduleResolution"\s*:\s*"(node|node10|classic)"/i.exec(line);
+      if (m) bad.push(`${rel(root, file)}:${index + 1}  ${line.trim()}`);
+    });
+  }
+  if (bad.length === 0) return [];
+  return [
+    {
+      rule: 'tsconfig-removed-option',
+      severity: 'medium',
+      repo,
+      title: `tsconfig sets a moduleResolution that TypeScript 7 removed (${bad.length} place(s))`,
+      detail: 'Use "module": "node16" with "moduleResolution": "node16" (same emitted CommonJS for a package without "type": "module"). TypeScript 7 stops with TS5108 on "node" / "node10" / "classic".',
+      file: bad[0]?.split(':')[0],
+      count: bad.length,
+      evidence: bad.slice(0, MAX_EVIDENCE),
+    },
+  ];
+}
+
 function dependencyFindings(root: string, repo: string, pkg: PackageJson): AuditFinding[] {
   const findings: AuditFinding[] = [];
   const all = { ...pkg.peerDependencies, ...pkg.devDependencies, ...pkg.dependencies };
@@ -1059,6 +1086,7 @@ export function auditRepo(ref: RepoRef, options: { run?: boolean; now?: Date; sh
   const findings: AuditFinding[] = [
     ...scanCode(root, codeFiles, ref.name),
     ...dependencyFindings(root, ref.name, pkg),
+    ...tsconfigFindings(root, ref.name),
     ...governanceFindings(root, ref.name, pkg, now),
     ...pipelineFindings(root, ref.name, pkg, options.shared ?? ref.name.endsWith('-utils')),
     ...docFindings(root, ref.name, config),
