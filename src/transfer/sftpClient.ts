@@ -1,4 +1,5 @@
 import * as crypto from 'node:crypto';
+import * as fs from 'node:fs';
 import Client from 'ssh2-sftp-client';
 import { adapterStep, type Adapter } from '../adapters/adapter';
 import { getLogger } from '../logger/logger';
@@ -129,11 +130,36 @@ export class SftpClient implements Adapter {
     });
   }
 
-  /** Downloads a remote file to a local path. */
+  /**
+   * Downloads a remote file to a local path. Returns once the whole file is on disk: the local file is complete and
+   * closed, so reading it at once sees every byte. On a failure no partial file is left behind.
+   *
+   * (`ssh2-sftp-client` itself resolves `get(remote, localPath)` when the remote side has been read, which can be before
+   * the local write stream has flushed. This writes through a stream of its own and waits for it to close.)
+   */
   async download(remotePath: string, localPath: string): Promise<void> {
-    await adapterStep(this.name, 'download', () => this.client.get(remotePath, localPath), {
-      details: { remotePath, localPath },
-    });
+    await adapterStep(
+      this.name,
+      'download',
+      async () => {
+        const out = fs.createWriteStream(localPath);
+        const closed = new Promise<void>((resolve, reject) => {
+          out.once('close', resolve);
+          out.once('error', reject);
+        });
+        // Nobody awaits `closed` while get() is still running; a write error then belongs to get() (it listens too).
+        closed.catch(() => undefined);
+        try {
+          await this.client.get(remotePath, out);
+          await closed;
+        } catch (error) {
+          out.destroy();
+          await fs.promises.rm(localPath, { force: true });
+          throw error;
+        }
+      },
+      { details: { remotePath, localPath } },
+    );
   }
 
   async list(remoteDir: string): Promise<SftpFileInfo[]> {

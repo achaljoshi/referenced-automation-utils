@@ -1,6 +1,6 @@
 {
   "name": "@automation/referenced-automation-utils",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Shared, framework-agnostic utilities (env config, logging, crypto, date, random data, JSON/YAML/CSV/Excel, schema validation, object path traversal, email, DB) reused by every other referenced-automation-* repo.",
   "license": "UNLICENSED",
   "private": false,

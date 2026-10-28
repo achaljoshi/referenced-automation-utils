@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.1
+
+### Fixed
+- **`SftpClient.download()` returned before the file was fully written.** `ssh2-sftp-client` resolves `get(remote, localPath)` when the remote side has been read, which can be before the local write stream has flushed; a caller that read the file at once sometimes saw nothing or a part of it (seen in the `ui-api` order trace, about 5 runs in 100). `download()` now writes through a stream of its own and returns only when that stream has closed, so the whole file is on disk. A failed download also no longer leaves a partial (or empty) file behind. `tests/sftpClient.spec.ts` has a regression test that slows every write of the local file down and reads it straight after `download()` returns (it failed with 262120 of 262144 bytes before the fix), plus tests for an empty file, a missing remote file and a missing local folder.
+- Consumers: upgrade to `^1.0.1` (a range of `^1.0.0` can still install 1.0.0).
+
 ## Unreleased
 
 ### Added

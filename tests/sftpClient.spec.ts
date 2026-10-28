@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -52,6 +53,54 @@ test.describe('SftpClient @smoke', () => {
     await client.download('/downloaded.txt', localPath);
 
     expect(await fs.promises.readFile(localPath, 'utf-8')).toBe('server-side content');
+  });
+
+  test('download() returns only when the whole file is on disk, even when the disk is slow', async () => {
+    // ssh2-sftp-client resolves get(remote, localPath) when the READ side ends, before the write stream has flushed, so a
+    // caller that reads the file at once could see nothing or half of it (on a fast disk: now and then; here: always).
+    // The disk is made slow by delaying every write of the local file by 150 ms.
+    const content = crypto.randomBytes(256 * 1024);
+    await fs.promises.writeFile(path.join(server.root, 'big.bin'), content);
+    const localPath = path.join(localDir, 'big.bin');
+
+    // The library and this test share the one `fs` module object, so patching it here reaches the library's call.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const realFs = require('node:fs') as typeof fs;
+    const original = realFs.createWriteStream;
+    realFs.createWriteStream = ((...args: Parameters<typeof original>) => {
+      const stream = original.apply(realFs, args) as fs.WriteStream & { _write: (chunk: Buffer, encoding: string, done: () => void) => void; _writev: unknown };
+      const write = stream._write.bind(stream);
+      stream._writev = undefined;
+      stream._write = (chunk: Buffer, encoding: string, done: () => void) => setTimeout(() => write(chunk, encoding, done), 150);
+      return stream;
+    }) as typeof original;
+    try {
+      await client.download('/big.bin', localPath);
+    } finally {
+      realFs.createWriteStream = original;
+    }
+
+    const read = await fs.promises.readFile(localPath);
+    expect(read.length, 'bytes on disk right after download() returned').toBe(content.length);
+    expect(read.equals(content), 'content').toBe(true);
+  });
+
+  test('download() of an empty remote file creates an empty local file', async () => {
+    await fs.promises.writeFile(path.join(server.root, 'empty.txt'), '');
+    const localPath = path.join(localDir, 'empty.txt');
+    await client.download('/empty.txt', localPath);
+    expect((await fs.promises.stat(localPath)).size).toBe(0);
+  });
+
+  test('download() of a missing remote file fails with the server\'s reason and leaves no partial file behind', async () => {
+    const localPath = path.join(localDir, 'never-written.txt');
+    await expect(client.download('/does-not-exist.txt', localPath)).rejects.toThrow(/does-not-exist/);
+    expect(fs.existsSync(localPath)).toBe(false);
+  });
+
+  test('download() into a folder that does not exist fails and says which path', async () => {
+    const localPath = path.join(localDir, 'no-such-folder', 'file.txt');
+    await expect(client.download('/downloaded.txt', localPath)).rejects.toThrow(/no-such-folder/);
   });
 
   test('exists() reflects real file/dir state on the server', async () => {
