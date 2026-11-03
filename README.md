@@ -20,6 +20,8 @@ npm test
 
 First time on Windows? Read [Windows first run](#windows-first-run) - it lists the errors a fresh checkout usually hits and what fixes each.
 
+Setting up **all six repos** on a Windows machine? [`docs/SETUP_ALL_REPOS_WINDOWS.md`](docs/SETUP_ALL_REPOS_WINDOWS.md) is the one page with the whole procedure: tools, clone, setup in order, checks, VS Code, and a table of what each error means.
+
 `setup.sh`/`setup.bat` run `npm ci`. They first run `npm config set registry "$NPM_REGISTRY_URL"` when that variable is set, so every package is fetched from your organisation's npm registry (see [Publishing a package](#publishing-a-package-to-the-registry-jfrog-artifactory)). This package has no `@automation/*` dependencies of its own.
 
 **Setup stops with a certificate error** (`self-signed certificate in certificate chain`, `unable to get local issuer certificate`)? A company proxy that re-signs HTTPS with its own root certificate is the usual cause. `setup` checks for it first (`scripts/check-tls.js`: the npm registry and, where browsers are installed, the Playwright download host) and prints the exact fix: give Node the company root CA certificate (a `.pem` file from IT) through `NODE_EXTRA_CA_CERTS`, or on Node 22.15 or newer let it read the operating system's certificate store with `NODE_OPTIONS=--use-system-ca`. Do not work around it with `NODE_TLS_REJECT_UNAUTHORIZED=0`: that turns certificate checking off for every Node program started from that shell, npm included. The check connects directly from this machine; it does not use a proxy setting, so a machine that can only reach the registry through a proxy shows "could not connect" and setup carries on.

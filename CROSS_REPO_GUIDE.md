@@ -102,6 +102,8 @@ consumers.
 
 ## 3. Cloning and bootstrapping the repos
 
+On Windows, [`docs/SETUP_ALL_REPOS_WINDOWS.md`](docs/SETUP_ALL_REPOS_WINDOWS.md) is the complete step-by-step version of this section for all six repos (PowerShell commands, the order, the checks and the troubleshooting table).
+
 Clone the repo(s) you work in (all five if you want to change shared code):
 
 ```bash
