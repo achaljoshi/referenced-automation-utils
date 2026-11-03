@@ -25,4 +25,8 @@ echo "== Installing dependencies ============================================"
 npm ci
 
 echo ""
+echo "== VS Code extensions (optional: a failure here never stops setup) =="
+node scripts/install-vscode-extensions.js || true
+
+echo ""
 echo "Setup complete. Try: npm test"

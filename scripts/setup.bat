@@ -27,6 +27,10 @@ call npm ci
 if errorlevel 1 exit /b 1
 
 echo.
+echo == VS Code extensions ^(optional: a failure here never stops setup^) ==
+call node scripts\install-vscode-extensions.js
+
+echo.
 echo Setup complete. Try: npm test
 endlocal
 exit /b 0
