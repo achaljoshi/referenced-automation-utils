@@ -210,6 +210,10 @@ no `create-package.sh` and is never published.
 When the registry does not have the version yet, or you want to try a change
 before publishing it. `package.json` and the lockfile are not touched.
 
+**Offline bundle** - for a machine that reaches neither GitHub nor the registry yet: `./scripts/create-offline-bundle.sh` writes every package as a `.tgz`, every repo as a
+`.tar.gz` and a checksum list into one folder you copy over; [`docs/OFFLINE_BUNDLE.md`](docs/OFFLINE_BUNDLE.md) has the steps for using it on Windows and for
+uploading the same files to the registry later.
+
 **Automatic** - repos checked out as siblings under one parent directory:
 
 ```bash

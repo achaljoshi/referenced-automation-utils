@@ -36,7 +36,8 @@ npm run clean
 npm run build
 
 # `npm pack` runs the "prepack" script (build) again and writes <name>-<version>.tgz into the current directory.
-TARBALL="$(npm pack --silent)"
+# Lifecycle scripts (prepack, and sas's prebuild) print to standard output too: the tarball name is the LAST line.
+TARBALL="$(npm pack --silent | tail -n 1)"
 mv "$TARBALL" "$OUT_DIR/"
 
 echo ""
